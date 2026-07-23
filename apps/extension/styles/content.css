@@ -1,0 +1,356 @@
+/* X page layout plus the integrated reader pane. */
+:root {
+  --better-x-navigation-width: 275px;
+}
+
+html[data-better-x-layout="split"] {
+  overflow-x: hidden;
+}
+
+html[data-better-x-layout="split"] header[role="banner"] {
+  flex: 0 0 var(--better-x-navigation-width) !important;
+  width: var(--better-x-navigation-width) !important;
+  max-width: var(--better-x-navigation-width) !important;
+}
+
+html[data-better-x-layout="split"] main {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+html[data-better-x-layout="split"] [data-testid="sidebarColumn"] {
+  display: none !important;
+}
+
+better-x-reader .better-x-reader__preview > article [data-testid="tweetText"] {
+  font-size: 18px !important;
+  line-height: 24px !important;
+}
+
+html[data-better-x-density="compact"]
+  [data-testid="primaryColumn"]
+  article[data-testid="tweet"]
+  [data-testid="tweetText"] {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+}
+
+html[data-better-x-density="compact"]
+  [data-testid="primaryColumn"]
+  article[data-testid="tweet"]
+  [data-testid="tweetPhoto"],
+html[data-better-x-density="compact"]
+  [data-testid="primaryColumn"]
+  article[data-testid="tweet"]
+  [data-testid="videoPlayer"] {
+  max-height: 220px !important;
+  overflow: hidden !important;
+}
+
+html[data-better-x-density="compact"]
+  [data-testid="primaryColumn"]
+  article[data-testid="tweet"]
+  video {
+  max-height: 220px !important;
+  object-fit: cover !important;
+}
+
+html[data-better-x-layout="split"]
+  [data-testid="primaryColumn"]
+  article[data-better-x-active="true"] {
+  background: rgb(29 155 240 / 7%) !important;
+  box-shadow: inset 3px 0 0 rgb(29 155 240);
+}
+
+html[data-better-x-layout="split"]
+  [data-testid="primaryColumn"]
+  article[data-better-x-active="pinned"] {
+  background: rgb(29 155 240 / 11%) !important;
+  box-shadow: inset 3px 0 0 rgb(29 155 240);
+}
+
+better-x-reader {
+  --better-x-accent: #1d9bf0;
+  --better-x-background: #fff;
+  --better-x-border: #eff3f4;
+  --better-x-elevated: #f7f9f9;
+  --better-x-muted: #536471;
+  --better-x-text: #0f1419;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 875px;
+  z-index: 2;
+  box-sizing: border-box;
+  display: block;
+  font-family:
+    TwitterChirp, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--better-x-text);
+  background: var(--better-x-background);
+  border-left: 1px solid var(--better-x-border);
+}
+
+better-x-reader[data-theme="dark"] {
+  --better-x-background: #000;
+  --better-x-border: #2f3336;
+  --better-x-elevated: #16181c;
+  --better-x-muted: #71767b;
+  --better-x-text: #e7e9ea;
+}
+
+better-x-reader[hidden] {
+  display: none !important;
+}
+
+better-x-reader,
+better-x-reader * {
+  box-sizing: border-box;
+}
+
+better-x-reader .better-x-reader {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  height: 100%;
+  color: var(--better-x-text);
+  background: var(--better-x-background);
+}
+
+better-x-reader .better-x-reader__toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 62px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--better-x-background) 88%, transparent);
+  border-bottom: 1px solid var(--better-x-border);
+  backdrop-filter: blur(16px);
+}
+
+better-x-reader .better-x-reader__brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+better-x-reader .better-x-reader__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--better-x-background);
+  letter-spacing: -0.03em;
+  background: var(--better-x-text);
+  border-radius: 10px;
+}
+
+better-x-reader .better-x-reader__titles {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+better-x-reader .better-x-reader__title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 18px;
+  color: var(--better-x-text);
+}
+
+better-x-reader .better-x-reader__status {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--better-x-muted);
+  white-space: nowrap;
+}
+
+better-x-reader .better-x-reader__status::before {
+  width: 6px;
+  height: 6px;
+  content: "";
+  background: #00ba7c;
+  border-radius: 999px;
+}
+
+better-x-reader[data-pinned="true"] .better-x-reader__status::before {
+  background: var(--better-x-accent);
+}
+
+better-x-reader .better-x-reader__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+
+better-x-reader .better-x-reader__button,
+better-x-reader .better-x-reader__open {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  color: var(--better-x-text);
+  text-decoration: none;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--better-x-border);
+  border-radius: 999px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+better-x-reader .better-x-reader__button:hover,
+better-x-reader .better-x-reader__open:hover {
+  background: var(--better-x-elevated);
+  border-color: color-mix(
+    in srgb,
+    var(--better-x-muted) 45%,
+    var(--better-x-border)
+  );
+}
+
+better-x-reader .better-x-reader__button:focus-visible,
+better-x-reader .better-x-reader__open:focus-visible {
+  outline: 2px solid var(--better-x-accent);
+  outline-offset: 2px;
+}
+
+better-x-reader .better-x-reader__button--icon {
+  width: 34px;
+  padding: 0;
+  font-size: 16px;
+}
+
+better-x-reader[data-pinned="true"] .better-x-reader__button--pin {
+  color: #fff;
+  background: var(--better-x-accent);
+  border-color: var(--better-x-accent);
+}
+
+better-x-reader .better-x-reader__scroller {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+better-x-reader .better-x-reader__preview {
+  width: 100%;
+  max-width: 720px;
+  min-height: 100%;
+  margin: 0 auto;
+}
+
+better-x-reader .better-x-reader__preview > article {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 0 !important;
+  cursor: default !important;
+  background: var(--better-x-background) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+better-x-reader .better-x-reader__preview > article:hover {
+  background: var(--better-x-background) !important;
+}
+
+better-x-reader .better-x-reader__placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 110px);
+  padding: 48px;
+  color: var(--better-x-muted);
+  text-align: center;
+}
+
+better-x-reader .better-x-reader__placeholder-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  font-size: 28px;
+  color: var(--better-x-accent);
+  background: var(--better-x-elevated);
+  border: 1px solid var(--better-x-border);
+  border-radius: 20px;
+}
+
+better-x-reader .better-x-reader__placeholder-title {
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 22px;
+  color: var(--better-x-text);
+}
+
+better-x-reader .better-x-reader__placeholder-copy {
+  max-width: 280px;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+better-x-reader .better-x-reader__footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--better-x-muted);
+  background: var(--better-x-background);
+  border-top: 1px solid var(--better-x-border);
+}
+
+better-x-reader .better-x-reader__footer kbd {
+  min-width: 20px;
+  padding: 2px 5px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--better-x-text);
+  text-align: center;
+  background: var(--better-x-elevated);
+  border: 1px solid var(--better-x-border);
+  border-radius: 5px;
+}
+
+@media (max-width: 1299px) {
+  :root {
+    --better-x-navigation-width: 88px;
+  }
+}
+
+@media (max-width: 1039px) {
+  better-x-reader {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  better-x-reader .better-x-reader__button,
+  better-x-reader .better-x-reader__open {
+    transition: none;
+  }
+}
