@@ -1,0 +1,158 @@
+@import "@better-x/ui/globals.css";
+@source "./**/*.{ts,tsx}";
+
+:root {
+  --desktop-titlebar-controls-width: 5rem;
+  --workspace-surface-inset: 6px;
+  --workspace-surface-radius: 14px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+body {
+  overflow: hidden;
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.4;
+  color: var(--editor-ink);
+  user-select: none;
+  background: transparent;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea,
+[data-desktop-interactive] {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+[data-desktop-drag] {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-name="App"] {
+  background: transparent;
+}
+
+.workspace-surface {
+  display: grid;
+  grid-template-columns: minmax(0, 46fr) 6px minmax(0, 54fr);
+  margin: 0 var(--workspace-surface-inset) var(--workspace-surface-inset);
+  overflow: hidden;
+  border-radius: var(--workspace-surface-radius);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+}
+
+.workspace-surface[data-mode="error"],
+.workspace-surface[data-mode="login"],
+.workspace-surface[data-mode="starting"] {
+  display: block;
+}
+
+.post-placeholder,
+.startup-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 44px;
+  text-align: center;
+}
+
+.post-placeholder {
+  grid-column: 1;
+  background: var(--editor-surface);
+}
+
+.timeline-placeholder {
+  grid-column: 3;
+  min-width: 0;
+  background: var(--editor-surface);
+}
+
+.post-placeholder h1,
+.startup-placeholder h1 {
+  margin: 16px 0 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--editor-ink);
+  letter-spacing: -0.015em;
+}
+
+.post-placeholder p,
+.startup-placeholder p {
+  max-width: 300px;
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--editor-faint);
+}
+
+.placeholder-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: var(--editor-muted);
+  background: var(--editor-sunken);
+  border: 1px solid var(--editor-hairline);
+  border-radius: 15px;
+}
+
+.loading-ring {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--editor-hairline-strong);
+  border-top-color: var(--editor-muted);
+  border-radius: 999px;
+  animation: loading-ring 700ms linear infinite;
+}
+
+.status-dot {
+  background: #00a865;
+}
+
+[data-name="WorkspaceStatus"][data-mode="error"] .status-dot {
+  background: #e5484d;
+}
+
+[data-name="WorkspaceStatus"][data-mode="login"] .status-dot,
+[data-name="WorkspaceStatus"][data-mode="starting"] .status-dot {
+  background: #e8a317;
+}
+
+@keyframes loading-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

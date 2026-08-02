@@ -1,0 +1,170 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/manrope";
+@source "../../../apps/**/*.{ts,tsx}";
+@source "../**/*.{ts,tsx}";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --surface-1: #fafafa;
+  --surface-2: #fcfcfc;
+  --surface-3: #ffffff;
+  --surface-4: #ffffff;
+  --surface-5: #ffffff;
+  --surface-6: #ffffff;
+  --surface-7: #ffffff;
+  --surface-8: #ffffff;
+
+  --shadow-color: rgb(0 0 0 / 0.06);
+  --shadow-1: 0 0 0 1px var(--shadow-color);
+  --shadow-2:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color);
+  --shadow-3:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color);
+  --shadow-4:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color),
+    0 6px 6px -3px var(--shadow-color);
+  --shadow-5:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color),
+    0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color);
+  --shadow-6:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color),
+    0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color),
+    0 24px 24px -12px var(--shadow-color);
+  --shadow-7:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color),
+    0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color),
+    0 24px 24px -12px var(--shadow-color),
+    0 48px 48px -24px var(--shadow-color);
+  --shadow-8:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color),
+    0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color),
+    0 24px 24px -12px var(--shadow-color),
+    0 48px 48px -24px var(--shadow-color),
+    0 96px 96px -48px var(--shadow-color);
+
+  --background: var(--surface-1);
+  --foreground: #171717;
+  --card: var(--surface-3);
+  --card-foreground: #171717;
+  --muted: var(--surface-2);
+  --muted-foreground: #737373;
+
+  --brand: #406bde;
+  --brand-foreground: #ffffff;
+  --brand-strong: color-mix(in oklab, var(--brand), black 10%);
+  --brand-soft: color-mix(in oklab, var(--brand) 12%, transparent);
+  --brand-softer: color-mix(in oklab, var(--brand) 6%, transparent);
+  --brand-tint: color-mix(in oklab, var(--brand) 18%, transparent);
+
+  --editor-ink: #111111;
+  --editor-muted: #5a5a5a;
+  --editor-faint: #7f7f7f;
+  --editor-surface: #ffffff;
+  --editor-sunken: #f7f7f8;
+  --editor-sunken-2: #f2f2f2;
+  --editor-code-bg: #f4f4f5;
+  --editor-hairline: rgb(0 0 0 / 0.06);
+  --editor-hairline-strong: rgb(0 0 0 / 0.1);
+  --editor-focus-ring: 0 0 0 2px
+    color-mix(in oklab, var(--brand) 22%, transparent);
+  --editor-selection: color-mix(in oklab, var(--brand) 30%, transparent);
+
+  --accent: #e5e5e5;
+  --accent-foreground: #171717;
+  --selected: #d4d4d4;
+  --border: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --ring: var(--brand);
+  --input: #e5e5e5;
+  --destructive: #ef4444;
+  --destructive-light: #fef2f2;
+  --overlay: 0 0 0;
+  --hover: rgb(var(--overlay) / 0.06);
+  --active: rgb(var(--overlay) / 0.1);
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --font-kbd: "Geist Variable", sans-serif;
+  --font-sans: "Manrope Variable", sans-serif;
+  --text-xss: 11px;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-selected: var(--selected);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-destructive: var(--destructive);
+  --color-destructive-light: var(--destructive-light);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-softer: var(--brand-softer);
+  --color-brand-tint: var(--brand-tint);
+  --color-editor-ink: var(--editor-ink);
+  --color-editor-muted: var(--editor-muted);
+  --color-editor-faint: var(--editor-faint);
+  --color-editor-surface: var(--editor-surface);
+  --color-editor-sunken: var(--editor-sunken);
+  --color-editor-sunken-2: var(--editor-sunken-2);
+  --color-editor-code: var(--editor-code-bg);
+  --color-editor-hairline: var(--editor-hairline);
+  --color-editor-hairline-strong: var(--editor-hairline-strong);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-surface-5: var(--surface-5);
+  --color-surface-6: var(--surface-6);
+  --color-surface-7: var(--surface-7);
+  --color-surface-8: var(--surface-8);
+  --shadow-surface-1: var(--shadow-1);
+  --shadow-surface-2: var(--shadow-2);
+  --shadow-surface-3: var(--shadow-3);
+  --shadow-surface-4: var(--shadow-4);
+  --shadow-surface-5: var(--shadow-5);
+  --shadow-surface-6: var(--shadow-6);
+  --shadow-surface-7: var(--shadow-7);
+  --shadow-surface-8: var(--shadow-8);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground;
+  }
+}

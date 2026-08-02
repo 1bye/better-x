@@ -145,7 +145,7 @@ function Popup() {
       <section aria-label="Reader settings" className="settings">
         <SettingToggle
           checked={settings.enabled}
-          description="Replace the right rail with a post reader."
+          description="Turn the feed into a conversation-first workspace."
           disabled={!isReady}
           label="Split view"
           name="enabled"
@@ -161,7 +161,7 @@ function Popup() {
         />
         <SettingToggle
           checked={settings.followCursor}
-          description="Preview the post that stays under your pointer."
+          description="Preview the post under your pointer in the reader."
           disabled={!(isReady && settings.enabled)}
           label="Follow cursor"
           name="followCursor"
@@ -176,7 +176,7 @@ function Popup() {
           </span>
         ) : (
           <span>
-            On X, press <kbd>P</kbd> to pin a post.
+            Hover a post, then press <kbd>P</kbd> to pin its preview.
           </span>
         )}
       </footer>

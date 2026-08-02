@@ -1,44 +1,51 @@
-# better-x
+# Better X
 
-This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack.
+A focused desktop reader and browser extension for X.
 
 ## Features
 
-- **TypeScript** - For type safety and improved developer experience
-- **Oxlint** - Oxlint + Oxfmt (linting & formatting)
-- **Vite+** - Unified Vite toolchain, workspace task runner, linting, and formatting
+- **Desktop split view** — authenticated timeline on the right and the selected
+  full conversation on the left.
+- **Warm post switching** — a bounded Electron `WebContentsView` pool preloads
+  nearby posts.
+- **Persistent session** — every X view shares one isolated Chromium profile.
+- **Browser extension** — the original WXT reader remains available.
+- **Shared design system** — the desktop shell uses the same subtle surfaces,
+  tokens, typography, and macOS chrome as 1git.
 
 ## Getting Started
-
-First, install the dependencies:
 
 ```bash
 bun install
 ```
 
-Then, run the development server:
+Run the desktop app:
 
 ```bash
-bun run dev
+bun run --cwd apps/desktop dev
 ```
 
-## Git Hooks and Formatting
+Run the extension:
 
-- Run checks: `bun run check`
+```bash
+bun run --cwd apps/extension dev
+```
 
 ## Project Structure
 
 ```
 better-x/
 ├── apps/
+│   ├── desktop/   # Electron + React desktop shell
+│   └── extension/ # WXT browser extension
+└── packages/
+    ├── config/    # Shared TypeScript configuration
+    └── ui/        # Shared UI components and design tokens
 ```
 
 ## Available Scripts
 
-- `bun run dev`: Start all applications in development mode
-- `bun run build`: Build all applications
-- `bun run check-types`: Check TypeScript types across all apps
-- `bun run check`: Run Vite+ format/lint checks and workspace TypeScript checks
-- `bun run lint`: Run Vite+ lint checks
-- `bun run format`: Run Vite+ formatting
-- `bun run staged`: Run Vite+ checks against staged files
+- `bun run build`: Build every workspace.
+- `bun run check-types`: Type-check every workspace.
+- `bun run check`: Run Ultracite.
+- `bun run fix`: Apply Ultracite fixes.

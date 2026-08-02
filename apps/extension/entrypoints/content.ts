@@ -6,11 +6,13 @@ import { type ReaderSettings, readerSettings } from "../lib/settings";
 import "../styles/content.css";
 
 const ACTIVE_ATTRIBUTE = "data-better-x-active";
+const EMBED_LOAD_DELAY = 180;
+const EMBED_URL = "https://platform.twitter.com/embed/Tweet.html";
+const LANGUAGE_PATTERN = /^([a-z]{2,3})(?:-|$)/i;
 const MINIMUM_SPLIT_WIDTH = 1040;
 const PRIMARY_COLUMN_SELECTOR = '[data-testid="primaryColumn"]';
 const PROFILE_PATH_PATTERN = /^\/[a-zA-Z0-9_]{1,30}\/?$/;
-const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/\d+\/?$/;
-const SUPPORTED_ACTIONS = new Set(["bookmark", "like", "reply", "retweet"]);
+const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/(\d+)\/?$/;
 const SUPPORTED_ROUTES = new Set([
   "/bookmarks",
   "/explore",
@@ -20,6 +22,9 @@ const SUPPORTED_ROUTES = new Set([
 ]);
 const TRAILING_SLASH_PATTERN = /\/$/;
 
+type EmbedStatus = "error" | "idle" | "loading" | "ready";
+type ReaderTheme = "dark" | "light";
+
 interface PointerPosition {
   x: number;
   y: number;
@@ -27,20 +32,25 @@ interface PointerPosition {
 
 interface ReaderElements {
   closeButton: HTMLButtonElement;
+  embedFrame: HTMLIFrameElement;
   footerMode: HTMLSpanElement;
   host: HTMLElement;
   openLink: HTMLAnchorElement;
   pinButton: HTMLButtonElement;
   placeholder: HTMLDivElement;
-  preview: HTMLDivElement;
+  placeholderCopy: HTMLSpanElement;
+  placeholderTitle: HTMLElement;
   status: HTMLSpanElement;
 }
 
 interface ReaderState {
   activePostUrl: string | null;
   activeSource: HTMLElement | null;
+  embedStatus: EmbedStatus;
+  embedTheme: ReaderTheme | null;
   isPinned: boolean;
   lastPointer: PointerPosition | null;
+  loadedPostUrl: string | null;
   settings: ReaderSettings;
 }
 
@@ -62,10 +72,10 @@ const createElement = <K extends keyof HTMLElementTagNameMap>(
 const createReaderElements = (): ReaderElements => {
   const host = document.createElement("better-x-reader");
   host.hidden = true;
-  host.setAttribute("aria-label", "Better X post reader");
+  host.setAttribute("aria-label", "Better X embedded post reader");
 
   const reader = createElement("aside", "better-x-reader");
-  reader.setAttribute("aria-label", "Selected post");
+  reader.setAttribute("aria-label", "Selected X post");
 
   const toolbar = createElement("header", "better-x-reader__toolbar");
   const brand = createElement("div", "better-x-reader__brand");
@@ -73,7 +83,7 @@ const createReaderElements = (): ReaderElements => {
   mark.setAttribute("aria-hidden", "true");
 
   const titles = createElement("div", "better-x-reader__titles");
-  const title = createElement("span", "better-x-reader__title", "Reader");
+  const title = createElement("span", "better-x-reader__title", "Post");
   const status = createElement(
     "span",
     "better-x-reader__status",
@@ -91,9 +101,13 @@ const createReaderElements = (): ReaderElements => {
   pinButton.type = "button";
   pinButton.disabled = true;
   pinButton.setAttribute("aria-pressed", "false");
-  pinButton.title = "Keep this post in the reader (P)";
+  pinButton.title = "Keep this post selected (P)";
 
-  const openLink = createElement("a", "better-x-reader__open", "Open ↗");
+  const openLink = createElement(
+    "a",
+    "better-x-reader__open",
+    "View replies ↗"
+  );
   openLink.hidden = true;
   openLink.rel = "noopener";
   openLink.target = "_blank";
@@ -110,33 +124,39 @@ const createReaderElements = (): ReaderElements => {
   actions.append(pinButton, openLink, closeButton);
   toolbar.append(brand, actions);
 
-  const scroller = createElement("div", "better-x-reader__scroller");
-  const preview = createElement("div", "better-x-reader__preview");
-  preview.setAttribute("aria-live", "off");
+  const viewport = createElement("div", "better-x-reader__viewport");
+  const embedFrame = createElement("iframe", "better-x-reader__embed");
+  embedFrame.allow =
+    "autoplay; encrypted-media; fullscreen; picture-in-picture; web-share";
+  embedFrame.hidden = true;
+  embedFrame.loading = "eager";
+  embedFrame.referrerPolicy = "strict-origin-when-cross-origin";
+  embedFrame.title = "Official X embedded post";
 
   const placeholder = createElement("div", "better-x-reader__placeholder");
+  placeholder.setAttribute("aria-live", "polite");
+  placeholder.setAttribute("role", "status");
   const placeholderIcon = createElement(
     "span",
     "better-x-reader__placeholder-icon",
-    "↘"
+    "𝕏"
   );
   placeholderIcon.setAttribute("aria-hidden", "true");
   const placeholderTitle = createElement(
     "strong",
     "better-x-reader__placeholder-title",
-    "Move across the feed"
+    "Choose a post"
   );
   const placeholderCopy = createElement(
     "span",
     "better-x-reader__placeholder-copy",
-    "The post under your cursor will appear here while the timeline keeps moving."
+    "Pause over a post to load its official X embed here."
   );
   placeholder.append(placeholderIcon, placeholderTitle, placeholderCopy);
-  preview.append(placeholder);
-  scroller.append(preview);
+  viewport.append(embedFrame, placeholder);
 
   const footer = createElement("footer", "better-x-reader__footer");
-  const footerMode = createElement("span", undefined, "Live preview");
+  const footerMode = createElement("span", undefined, "Official X embed");
   const shortcut = createElement("kbd", undefined, "P");
   const shortcutCopy = createElement(
     "span",
@@ -145,34 +165,64 @@ const createReaderElements = (): ReaderElements => {
   );
   footer.append(footerMode, shortcut, shortcutCopy);
 
-  reader.append(toolbar, scroller, footer);
+  reader.append(toolbar, viewport, footer);
   host.append(reader);
   document.body.append(host);
 
   return {
     closeButton,
+    embedFrame,
     footerMode,
     host,
     openLink,
     pinButton,
     placeholder,
-    preview,
+    placeholderCopy,
+    placeholderTitle,
     status,
   };
 };
 
 const getPostUrl = (article: HTMLElement): string | null => {
   const links = article.querySelectorAll<HTMLAnchorElement>("a[href]");
+  let fallbackUrl: string | null = null;
   for (const link of links) {
     const url = new URL(link.href, window.location.origin);
     if (
       url.origin === window.location.origin &&
       STATUS_PATH_PATTERN.test(url.pathname)
     ) {
-      return url.href;
+      if (link.querySelector("time")) {
+        return url.href;
+      }
+      fallbackUrl ??= url.href;
     }
   }
-  return null;
+  return fallbackUrl;
+};
+
+const getPostId = (postUrl: string): string | null => {
+  const match = new URL(postUrl).pathname.match(STATUS_PATH_PATTERN);
+  return match?.[1] ?? null;
+};
+
+const getEmbedLanguage = (): string => {
+  const language = document.documentElement.lang.match(LANGUAGE_PATTERN)?.[1];
+  return language?.toLowerCase() ?? "en";
+};
+
+const getEmbedUrl = (postUrl: string, theme: ReaderTheme): string | null => {
+  const postId = getPostId(postUrl);
+  if (!postId) {
+    return null;
+  }
+
+  const url = new URL(EMBED_URL);
+  url.searchParams.set("dnt", "true");
+  url.searchParams.set("id", postId);
+  url.searchParams.set("lang", getEmbedLanguage());
+  url.searchParams.set("theme", theme);
+  return url.href;
 };
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
@@ -191,7 +241,7 @@ const isSupportedRoute = (): boolean => {
   );
 };
 
-const getPageTheme = (): "dark" | "light" => {
+const getPageTheme = (): ReaderTheme => {
   const background = getComputedStyle(document.body).backgroundColor;
   const channels = background.match(/\d+/g)?.slice(0, 3).map(Number);
   if (!channels || channels.length < 3) {
@@ -222,35 +272,6 @@ const getAnchorY = (
   return pointerY < 100 || pointerY > viewportHeight - 100
     ? defaultY
     : pointerY;
-};
-
-const cloneArticle = (source: HTMLElement): HTMLElement => {
-  const clone = source.cloneNode(true) as HTMLElement;
-  clone.dataset.betterXPreview = "true";
-  clone.removeAttribute(ACTIVE_ATTRIBUTE);
-
-  for (const element of clone.querySelectorAll<HTMLElement>("[id]")) {
-    element.removeAttribute("id");
-  }
-
-  for (const element of clone.querySelectorAll<HTMLElement>(
-    "[aria-describedby]"
-  )) {
-    element.removeAttribute("aria-describedby");
-  }
-
-  for (const link of clone.querySelectorAll<HTMLAnchorElement>("a[href]")) {
-    link.rel = "noopener";
-    link.target = "_blank";
-  }
-
-  for (const video of clone.querySelectorAll<HTMLVideoElement>("video")) {
-    video.autoplay = false;
-    video.muted = true;
-    video.preload = "metadata";
-  }
-
-  return clone;
 };
 
 const findArticleAtAnchor = (
@@ -294,65 +315,127 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
   const state: ReaderState = {
     activePostUrl: null,
     activeSource: null,
+    embedStatus: "idle",
+    embedTheme: null,
     isPinned: false,
     lastPointer: null,
+    loadedPostUrl: null,
     settings: initialSettings,
   };
 
+  let embedTimer = 0;
   let layoutFrame = 0;
   let positionFrame = 0;
-  let renderTimer = 0;
   let selectionFrame = 0;
 
   const updateModeLabels = (): void => {
+    elements.host.dataset.embedStatus = state.embedStatus;
     elements.host.dataset.pinned = String(state.isPinned);
     elements.pinButton.setAttribute("aria-pressed", String(state.isPinned));
     elements.pinButton.textContent = state.isPinned ? "Pinned" : "Pin";
 
+    if (state.embedStatus === "error") {
+      elements.status.textContent = "Embed unavailable";
+      elements.footerMode.textContent = "View replies on X";
+      return;
+    }
+    if (state.embedStatus === "loading") {
+      elements.status.textContent = "Loading X embed…";
+      elements.footerMode.textContent = "Official X embed";
+      return;
+    }
     if (state.isPinned) {
       elements.status.textContent = "Pinned post";
-      elements.footerMode.textContent = "Reader locked";
+      elements.footerMode.textContent = "Selection locked";
       return;
     }
 
     elements.status.textContent = state.settings.followCursor
       ? "Following cursor"
       : "Following scroll";
-    elements.footerMode.textContent = "Live preview";
+    elements.footerMode.textContent = "Official X embed";
   };
 
-  const renderActiveArticle = (force = false): void => {
-    const { activePostUrl, activeSource } = state;
-    if (!(activeSource?.isConnected && activePostUrl)) {
-      elements.preview.replaceChildren(elements.placeholder);
-      elements.openLink.hidden = true;
-      elements.pinButton.disabled = true;
-      return;
-    }
+  const renderSelection = (): void => {
+    const hasSelection = Boolean(state.activePostUrl);
+    const embedIsCurrent =
+      hasSelection &&
+      state.loadedPostUrl === state.activePostUrl &&
+      state.embedStatus === "ready";
 
-    const existingPreview = elements.preview.querySelector<HTMLElement>(
-      "[data-better-x-preview]"
+    elements.openLink.hidden = !hasSelection;
+    elements.pinButton.disabled = !hasSelection;
+    elements.embedFrame.hidden = !(
+      hasSelection &&
+      state.loadedPostUrl === state.activePostUrl &&
+      state.embedStatus !== "error"
     );
-    if (!force && existingPreview?.dataset.postUrl === activePostUrl) {
+    elements.placeholder.hidden = Boolean(embedIsCurrent);
+
+    if (state.activePostUrl) {
+      elements.openLink.href = state.activePostUrl;
+    }
+
+    if (!hasSelection) {
+      elements.placeholderTitle.textContent = "Choose a post";
+      elements.placeholderCopy.textContent =
+        "Pause over a post to load its official X embed here.";
+      updateModeLabels();
+      return;
+    }
+    if (state.embedStatus === "error") {
+      elements.placeholderTitle.textContent = "This post cannot be embedded";
+      elements.placeholderCopy.textContent =
+        "Protected or restricted posts may only be available directly on X.";
+      updateModeLabels();
       return;
     }
 
-    const clone = cloneArticle(activeSource);
-    clone.dataset.postUrl = activePostUrl;
-    elements.preview.replaceChildren(clone);
-    elements.openLink.href = activePostUrl;
-    elements.openLink.hidden = false;
-    elements.pinButton.disabled = false;
+    elements.placeholderTitle.textContent = "Loading post…";
+    elements.placeholderCopy.textContent =
+      "Fetching the official X embed with media and post actions.";
+    updateModeLabels();
   };
 
-  const scheduleActiveRender = (): void => {
-    if (renderTimer) {
-      window.clearTimeout(renderTimer);
+  const loadActiveEmbed = (): void => {
+    embedTimer = 0;
+    const postUrl = state.activePostUrl;
+    if (!postUrl) {
+      return;
     }
-    renderTimer = ctx.setTimeout(() => {
-      renderTimer = 0;
-      renderActiveArticle(true);
-    }, 120);
+
+    const theme = getPageTheme();
+    const embedUrl = getEmbedUrl(postUrl, theme);
+    if (!embedUrl) {
+      state.embedStatus = "error";
+      renderSelection();
+      return;
+    }
+    if (
+      state.loadedPostUrl === postUrl &&
+      state.embedTheme === theme &&
+      state.embedStatus !== "error"
+    ) {
+      return;
+    }
+
+    state.embedStatus = "loading";
+    state.embedTheme = theme;
+    state.loadedPostUrl = postUrl;
+    elements.embedFrame.src = embedUrl;
+    renderSelection();
+  };
+
+  const scheduleEmbedLoad = (): void => {
+    if (!state.activePostUrl) {
+      return;
+    }
+    if (embedTimer) {
+      window.clearTimeout(embedTimer);
+    }
+    state.embedStatus = "loading";
+    renderSelection();
+    embedTimer = ctx.setTimeout(loadActiveEmbed, EMBED_LOAD_DELAY);
   };
 
   const setPinned = (isPinned: boolean): void => {
@@ -377,11 +460,12 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
     if (!postUrl) {
       return;
     }
-    if (
-      !force &&
-      state.activePostUrl === postUrl &&
-      state.activeSource === article
-    ) {
+    if (!force && state.activePostUrl === postUrl) {
+      if (state.activeSource !== article) {
+        state.activeSource?.removeAttribute(ACTIVE_ATTRIBUTE);
+        state.activeSource = article;
+        article.setAttribute(ACTIVE_ATTRIBUTE, "true");
+      }
       return;
     }
 
@@ -389,7 +473,7 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
     state.activeSource = article;
     state.activePostUrl = postUrl;
     article.setAttribute(ACTIVE_ATTRIBUTE, "true");
-    renderActiveArticle(true);
+    scheduleEmbedLoad();
   };
 
   const selectFromViewport = (): void => {
@@ -456,44 +540,53 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
     });
   };
 
+  const clearSelection = (): void => {
+    if (embedTimer) {
+      window.clearTimeout(embedTimer);
+      embedTimer = 0;
+    }
+    state.activeSource?.removeAttribute(ACTIVE_ATTRIBUTE);
+    state.activeSource = null;
+    state.activePostUrl = null;
+    state.embedStatus = "idle";
+    state.isPinned = false;
+    renderSelection();
+  };
+
   const applyLayout = (): void => {
     const primaryColumn = document.querySelector(PRIMARY_COLUMN_SELECTOR);
-    const shouldShow =
+    const shouldShowReader =
       state.settings.enabled &&
       isSupportedRoute() &&
-      window.innerWidth >= MINIMUM_SPLIT_WIDTH &&
-      Boolean(primaryColumn);
+      Boolean(primaryColumn) &&
+      window.innerWidth >= MINIMUM_SPLIT_WIDTH;
 
     document.documentElement.toggleAttribute(
       "data-better-x-layout",
-      shouldShow
+      shouldShowReader
     );
-    if (shouldShow) {
+    if (shouldShowReader) {
       document.documentElement.dataset.betterXLayout = "split";
     }
 
+    const shouldCompact = shouldShowReader && state.settings.compactFeed;
     document.documentElement.toggleAttribute(
       "data-better-x-density",
-      shouldShow && state.settings.compactFeed
+      shouldCompact
     );
-    if (shouldShow && state.settings.compactFeed) {
+    if (shouldCompact) {
       document.documentElement.dataset.betterXDensity = "compact";
     }
 
-    elements.host.hidden = !shouldShow;
+    elements.host.hidden = !shouldShowReader;
     updateModeLabels();
 
-    if (shouldShow) {
+    if (shouldShowReader) {
       scheduleReaderPosition();
       scheduleViewportSelection();
       return;
     }
-
-    state.activeSource?.removeAttribute(ACTIVE_ATTRIBUTE);
-    state.activeSource = null;
-    state.activePostUrl = null;
-    state.isPinned = false;
-    renderActiveArticle(true);
+    clearSelection();
   };
 
   const scheduleLayout = (): void => {
@@ -534,30 +627,18 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
     }
   };
 
-  const handlePreviewClick = (event: Event): void => {
-    if (!(event.target instanceof Element)) {
-      return;
+  const handleEmbedLoad = (): void => {
+    if (state.activePostUrl && state.loadedPostUrl === state.activePostUrl) {
+      state.embedStatus = "ready";
+      renderSelection();
     }
-    if (event.target.closest("a[href]")) {
-      return;
-    }
-    const button = event.target.closest<HTMLButtonElement>("button");
-    if (!button) {
-      return;
-    }
+  };
 
-    const action = button.dataset.testid;
-    if (!(action && SUPPORTED_ACTIONS.has(action) && state.activeSource)) {
-      return;
+  const handleEmbedError = (): void => {
+    if (state.activePostUrl && state.loadedPostUrl === state.activePostUrl) {
+      state.embedStatus = "error";
+      renderSelection();
     }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const sourceAction = state.activeSource.querySelector<HTMLElement>(
-      `[data-testid="${action}"]`
-    );
-    sourceAction?.click();
-    scheduleActiveRender();
   };
 
   const disableReader = async (): Promise<void> => {
@@ -584,7 +665,8 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
     setPinned(false);
     scheduleLayout();
   });
-  ctx.addEventListener(elements.preview, "click", handlePreviewClick);
+  ctx.addEventListener(elements.embedFrame, "load", handleEmbedLoad);
+  ctx.addEventListener(elements.embedFrame, "error", handleEmbedError);
   ctx.addEventListener(elements.pinButton, "click", () => {
     setPinned(!state.isPinned);
   });
@@ -592,14 +674,7 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
     await disableReader();
   });
 
-  const observer = new MutationObserver((mutations) => {
-    const activeSourceChanged = mutations.some(
-      (mutation) =>
-        state.activeSource?.contains(mutation.target as Node) ?? false
-    );
-    if (activeSourceChanged) {
-      scheduleActiveRender();
-    }
+  const observer = new MutationObserver(() => {
     scheduleLayout();
     scheduleViewportSelection();
   });
@@ -629,9 +704,7 @@ const startReader = async (ctx: ContentScriptContext): Promise<void> => {
 };
 
 export default defineContentScript({
-  main(ctx) {
-    return startReader(ctx);
-  },
+  main: startReader,
   matches: ["*://x.com/*", "*://*.x.com/*"],
   runAt: "document_idle",
 });
