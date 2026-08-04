@@ -21,3 +21,13 @@ export const focusAnimations = storage.defineItem<boolean>(
     fallback: true,
   }
 );
+
+export const FOCUS_SCALES = [1, 1.25, 1.5] as const;
+export type FocusScale = (typeof FOCUS_SCALES)[number];
+
+export const focusScale = storage.defineItem<FocusScale>("local:focus-scale", {
+  fallback: FOCUS_SCALES[0],
+});
+
+export const isFocusScale = (value: unknown): value is FocusScale =>
+  FOCUS_SCALES.some((scale) => scale === value);

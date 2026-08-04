@@ -2,14 +2,19 @@ import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { defineContentScript } from "wxt/utils/define-content-script";
 
 import {
+  FOCUS_SCALES,
+  type FocusScale,
   type FocusSettings,
   focusAnimations,
+  focusScale,
   focusSettings,
+  isFocusScale,
 } from "../lib/settings";
 
 import "../styles/content.css";
 
 const ACTIVE_ATTRIBUTE = "data-better-x-focused";
+const ANIMATIONS_ATTRIBUTE = "data-better-x-animations";
 const BOUNDARY_SELECTION_DELAY_MS = 300;
 const CLOSE_DURATION_MS = 180;
 const FOCUS_ATTRIBUTE = "data-better-x-focus-mode";
@@ -26,7 +31,14 @@ const REPLY_COMPOSER_SELECTOR =
   '[role="dialog"] [data-testid^="tweetTextarea_"], [role="dialog"] [contenteditable="true"]';
 const REPLY_DETECTION_TIMEOUT_MS = 1200;
 const REPLY_SELECTOR = '[data-testid="reply"]';
+const SCALE_TRANSITION_DURATION_MS = 260;
+const SCALED_CONTAINER_ATTRIBUTE = "data-better-x-scaled-container";
 const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/\d+\/?$/;
+const TRANSPARENT_BACKGROUNDS = new Set([
+  "rgba(0, 0, 0, 0)",
+  "rgba(0,0,0,0)",
+  "transparent",
+]);
 
 type NavigationDirection = -1 | 1;
 
@@ -36,6 +48,7 @@ interface FocusElements {
   likeLabel: HTMLSpanElement;
   liveRegion: HTMLSpanElement;
   motionLabel: HTMLSpanElement;
+  scaleLabel: HTMLSpanElement;
   toolbar: HTMLElement;
 }
 
@@ -45,6 +58,7 @@ interface FocusState {
   hasObservedReplyComposer: boolean;
   isActive: boolean;
   isReplying: boolean;
+  postScale: FocusScale;
   returnUrl: string | null;
   settings: FocusSettings;
 }
@@ -54,6 +68,11 @@ interface SpotlightRect {
   left: number;
   top: number;
   width: number;
+}
+
+interface InlineStyleSnapshot {
+  priority: string;
+  value: string;
 }
 
 const createElement = <K extends keyof HTMLElementTagNameMap>(
@@ -161,11 +180,20 @@ const createFocusElements = (): FocusElements => {
     throw new Error("Focus Mode motion label could not be created.");
   }
 
+  const scaleShortcut = createShortcut(["S"], "Scale 1×");
+  const scaleLabel = scaleShortcut.querySelector<HTMLSpanElement>(
+    ".better-x-focus__shortcut-label"
+  );
+  if (!scaleLabel) {
+    throw new Error("Focus Mode scale label could not be created.");
+  }
+
   toolbar.append(
     likeShortcut,
     createShortcut(["R"], "Reply"),
     createShortcut(["↵"], "Open"),
     motionShortcut,
+    scaleShortcut,
     createShortcut(["Esc"], "Exit")
   );
 
@@ -182,6 +210,7 @@ const createFocusElements = (): FocusElements => {
     likeLabel,
     liveRegion,
     motionLabel,
+    scaleLabel,
     toolbar,
   };
 };
@@ -214,6 +243,22 @@ const isReplyComposerOpen = (): boolean => {
   const dialog = composer.closest('[role="dialog"]');
   return Boolean(dialog?.getClientRects().length);
 };
+
+const getPostBackgroundColor = (post: HTMLElement): string => {
+  let element = post.parentElement;
+  while (element) {
+    const { backgroundColor } = getComputedStyle(element);
+    if (!TRANSPARENT_BACKGROUNDS.has(backgroundColor)) {
+      return backgroundColor;
+    }
+    element = element.parentElement;
+  }
+  return "Canvas";
+};
+
+const getPostContainer = (post: HTMLElement): HTMLElement | null =>
+  post.closest<HTMLElement>('[data-testid="cellInnerDiv"]') ??
+  post.parentElement;
 
 const getPostLink = (post: HTMLElement): HTMLAnchorElement | null => {
   const links = post.querySelectorAll<HTMLAnchorElement>("a[href]");
@@ -259,6 +304,13 @@ const findNearestVisiblePost = (): HTMLElement | null => {
   return nearestPost;
 };
 
+const formatFocusScale = (scale: FocusScale): string => `${scale}×`;
+
+const getNextFocusScale = (currentScale: FocusScale): FocusScale => {
+  const currentIndex = FOCUS_SCALES.indexOf(currentScale);
+  return FOCUS_SCALES[currentIndex + 1] ?? FOCUS_SCALES[0];
+};
+
 const focusScrollBehavior = (animationsEnabled: boolean): ScrollBehavior =>
   animationsEnabled && !window.matchMedia(REDUCED_MOTION_QUERY).matches
     ? "smooth"
@@ -295,9 +347,10 @@ const scrollPostIntoSpotlight = (
 };
 
 const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
-  const [initialSettings, animationsEnabled] = await Promise.all([
+  const [initialSettings, animationsEnabled, savedScale] = await Promise.all([
     focusSettings.getValue(),
     focusAnimations.getValue(),
+    focusScale.getValue(),
   ]);
   if (ctx.isInvalid) {
     return;
@@ -310,13 +363,20 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     hasObservedReplyComposer: false,
     isActive: false,
     isReplying: false,
+    postScale: isFocusScale(savedScale) ? savedScale : FOCUS_SCALES[0],
     returnUrl: null,
     settings: initialSettings,
   };
+  const inlineBackgroundSnapshots = new WeakMap<
+    HTMLElement,
+    InlineStyleSnapshot
+  >();
 
   let geometryFrame = 0;
   let hideTimer = 0;
   let replyDetectionTimer = 0;
+  let scaleTrackingEndTime = 0;
+  let scaleTrackingFrame = 0;
   let selectionTimer = 0;
 
   const activePostObserver = new ResizeObserver(() => {
@@ -344,9 +404,72 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
 
   function updateMotionPreference(): void {
     elements.host.dataset.animations = String(state.animationsEnabled);
+    document.documentElement.setAttribute(
+      ANIMATIONS_ATTRIBUTE,
+      String(state.animationsEnabled)
+    );
     elements.motionLabel.textContent = state.animationsEnabled
       ? "Motion"
       : "Instant";
+  }
+
+  function restorePostBackground(post: HTMLElement): void {
+    const snapshot = inlineBackgroundSnapshots.get(post);
+    if (!snapshot) {
+      return;
+    }
+    if (snapshot.value) {
+      post.style.setProperty(
+        "background-color",
+        snapshot.value,
+        snapshot.priority
+      );
+    } else {
+      post.style.removeProperty("background-color");
+    }
+    inlineBackgroundSnapshots.delete(post);
+  }
+
+  function clearPostScalePresentation(post: HTMLElement): void {
+    delete post.dataset.betterXScale;
+    post.style.removeProperty("--better-x-post-scale");
+    restorePostBackground(post);
+    getPostContainer(post)?.removeAttribute(SCALED_CONTAINER_ATTRIBUTE);
+  }
+
+  function updateScalePreference(): void {
+    elements.host.dataset.scale = String(state.postScale);
+    elements.scaleLabel.textContent = `Scale ${formatFocusScale(
+      state.postScale
+    )}`;
+    const post = state.activePost;
+    if (!post) {
+      return;
+    }
+    post.dataset.betterXScale = String(state.postScale);
+    post.style.setProperty("--better-x-post-scale", String(state.postScale));
+    const container = getPostContainer(post);
+    if (
+      state.postScale === FOCUS_SCALES[0] ||
+      !state.isActive ||
+      state.isReplying
+    ) {
+      restorePostBackground(post);
+      container?.removeAttribute(SCALED_CONTAINER_ATTRIBUTE);
+      return;
+    }
+    if (!inlineBackgroundSnapshots.has(post)) {
+      inlineBackgroundSnapshots.set(post, {
+        priority: post.style.getPropertyPriority("background-color"),
+        value: post.style.getPropertyValue("background-color"),
+      });
+    }
+    post.style.setProperty(
+      "background-color",
+      getPostBackgroundColor(post),
+      "important"
+    );
+    container?.setAttribute(SCALED_CONTAINER_ATTRIBUTE, "true");
   }
 
   function updateGeometry(): void {
@@ -376,6 +499,27 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     geometryFrame = ctx.requestAnimationFrame(updateGeometry);
   };
 
+  const trackScaleGeometry = (): void => {
+    scaleTrackingEndTime =
+      window.performance.now() +
+      (state.animationsEnabled ? SCALE_TRANSITION_DURATION_MS : 0);
+    if (scaleTrackingFrame) {
+      return;
+    }
+    const trackFrame = (): void => {
+      scaleTrackingFrame = 0;
+      scheduleGeometry();
+      if (
+        state.isActive &&
+        !state.isReplying &&
+        window.performance.now() < scaleTrackingEndTime
+      ) {
+        scaleTrackingFrame = ctx.requestAnimationFrame(trackFrame);
+      }
+    };
+    trackFrame();
+  };
+
   const selectPost = (post: HTMLElement, shouldScroll = true): void => {
     if (!post.isConnected) {
       return;
@@ -384,10 +528,13 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       if (state.activePost) {
         activePostObserver.unobserve(state.activePost);
         state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+        clearPostScalePresentation(state.activePost);
       }
       state.activePost = post;
+      updateScalePreference();
       post.setAttribute(ACTIVE_ATTRIBUTE, "true");
       activePostObserver.observe(post);
+      trackScaleGeometry();
     }
 
     updateLikeLabel();
@@ -436,6 +583,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       hideTimer = 0;
     }
     updateMotionPreference();
+    updateScalePreference();
     elements.host.hidden = false;
     ctx.requestAnimationFrame(() => {
       if (state.isActive && !state.isReplying) {
@@ -470,10 +618,12 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     state.isReplying = false;
     state.returnUrl = null;
     clearReplyDetectionTimer();
+    document.documentElement.removeAttribute(ANIMATIONS_ATTRIBUTE);
     document.documentElement.removeAttribute(FOCUS_ATTRIBUTE);
     if (state.activePost) {
       activePostObserver.unobserve(state.activePost);
       state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+      clearPostScalePresentation(state.activePost);
       state.activePost = null;
     }
     hideFocusSurface();
@@ -497,13 +647,20 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     state.activePost?.setAttribute(ACTIVE_ATTRIBUTE, "true");
     showFocusSurface();
     scheduleGeometry();
+    trackScaleGeometry();
   };
 
   const suspendFocusSurfaceForReply = (): void => {
     state.hasObservedReplyComposer = false;
     state.isReplying = true;
     document.documentElement.removeAttribute(FOCUS_ATTRIBUTE);
-    state.activePost?.removeAttribute(ACTIVE_ATTRIBUTE);
+    if (state.activePost) {
+      state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+      restorePostBackground(state.activePost);
+      getPostContainer(state.activePost)?.removeAttribute(
+        SCALED_CONTAINER_ATTRIBUTE
+      );
+    }
     hideFocusSurface();
     clearReplyDetectionTimer();
     replyDetectionTimer = ctx.setTimeout(() => {
@@ -609,6 +766,24 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     }
   };
 
+  const togglePostScale = async (): Promise<void> => {
+    const previousScale = state.postScale;
+    const nextScale = getNextFocusScale(previousScale);
+    state.postScale = nextScale;
+    updateScalePreference();
+    trackScaleGeometry();
+    announce(`Post scale ${formatFocusScale(nextScale)}`);
+
+    try {
+      await focusScale.setValue(nextScale);
+    } catch {
+      state.postScale = previousScale;
+      updateScalePreference();
+      trackScaleGeometry();
+      announce("Post scale could not be saved");
+    }
+  };
+
   const replyToPost = (): void => {
     const button =
       state.activePost?.querySelector<HTMLButtonElement>(REPLY_SELECTOR);
@@ -684,6 +859,10 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       toggleAnimations().catch((error: unknown) => window.reportError(error));
       return true;
     }
+    if (event.key.toLowerCase() === "s") {
+      togglePostScale().catch((error: unknown) => window.reportError(error));
+      return true;
+    }
     return false;
   };
 
@@ -739,6 +918,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     if (state.activePost && !state.activePost.isConnected) {
       activePostObserver.unobserve(state.activePost);
       state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+      clearPostScalePresentation(state.activePost);
       state.activePost = null;
     }
     scheduleGeometry();
@@ -755,6 +935,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       if (state.activePost) {
         activePostObserver.unobserve(state.activePost);
         state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+        clearPostScalePresentation(state.activePost);
         state.activePost = null;
       }
       selectNearestPost();
@@ -780,11 +961,20 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     state.animationsEnabled = enabled;
     updateMotionPreference();
   });
+  const unwatchScale = focusScale.watch((scale) => {
+    if (!isFocusScale(scale)) {
+      return;
+    }
+    state.postScale = scale;
+    updateScalePreference();
+    trackScaleGeometry();
+  });
 
   ctx.onInvalidated(() => {
     activePostObserver.disconnect();
     pageObserver.disconnect();
     unwatchAnimations();
+    unwatchScale();
     unwatchSettings();
     if (geometryFrame) {
       window.cancelAnimationFrame(geometryFrame);
@@ -793,10 +983,17 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       window.clearTimeout(hideTimer);
     }
     clearReplyDetectionTimer();
+    if (scaleTrackingFrame) {
+      window.cancelAnimationFrame(scaleTrackingFrame);
+    }
     if (selectionTimer) {
       window.clearTimeout(selectionTimer);
     }
     state.activePost?.removeAttribute(ACTIVE_ATTRIBUTE);
+    if (state.activePost) {
+      clearPostScalePresentation(state.activePost);
+    }
+    document.documentElement.removeAttribute(ANIMATIONS_ATTRIBUTE);
     document.documentElement.removeAttribute(FOCUS_ATTRIBUTE);
     elements.host.remove();
   });

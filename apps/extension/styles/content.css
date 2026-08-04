@@ -37,6 +37,32 @@ better-x-focus .better-x-focus__backdrop {
   opacity: 0.48;
 }
 
+html[data-better-x-focus-mode="true"] article[data-better-x-focused="true"] {
+  position: relative !important;
+  z-index: 1 !important;
+  transform-origin: center;
+  scale: var(--better-x-post-scale, 1);
+}
+
+html[data-better-x-focus-mode="true"]
+  article[data-better-x-focused="true"][data-better-x-scale]:not(
+    [data-better-x-scale="1"]
+  ) {
+  border-radius: 12px;
+}
+
+html[data-better-x-focus-mode="true"] [data-better-x-scaled-container="true"] {
+  z-index: 2 !important;
+  overflow: visible !important;
+  isolation: isolate;
+}
+
+html[data-better-x-focus-mode="true"][data-better-x-animations="true"]
+  article[data-better-x-focused="true"] {
+  transition: scale 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: scale;
+}
+
 better-x-focus .better-x-focus__toolbar {
   position: fixed;
   bottom: max(20px, env(safe-area-inset-bottom));
@@ -134,6 +160,10 @@ better-x-focus[data-animations="false"] .better-x-focus__toolbar {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html[data-better-x-focus-mode="true"] article[data-better-x-focused="true"] {
+    transition: none;
+  }
+
   better-x-focus .better-x-focus__backdrop-layer,
   better-x-focus .better-x-focus__toolbar {
     transition: none;
