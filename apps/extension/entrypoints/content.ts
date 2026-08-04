@@ -1,7 +1,11 @@
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { defineContentScript } from "wxt/utils/define-content-script";
 
-import { type FocusSettings, focusSettings } from "../lib/settings";
+import {
+  type FocusSettings,
+  focusAnimations,
+  focusSettings,
+} from "../lib/settings";
 
 import "../styles/content.css";
 
@@ -25,20 +29,19 @@ const REPLY_SELECTOR = '[data-testid="reply"]';
 const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/\d+\/?$/;
 
 type NavigationDirection = -1 | 1;
-type PageTheme = "dark" | "light";
 
 interface FocusElements {
-  backdrop: SVGRectElement;
-  frame: HTMLDivElement;
   hole: SVGRectElement;
   host: HTMLElement;
   likeLabel: HTMLSpanElement;
   liveRegion: HTMLSpanElement;
+  motionLabel: HTMLSpanElement;
   toolbar: HTMLElement;
 }
 
 interface FocusState {
   activePost: HTMLElement | null;
+  animationsEnabled: boolean;
   hasObservedReplyComposer: boolean;
   isActive: boolean;
   isReplying: boolean;
@@ -138,9 +141,6 @@ const createFocusElements = (): FocusElements => {
   definitions.append(mask);
   backdropLayer.append(definitions, backdrop);
 
-  const frame = createElement("div", "better-x-focus__frame");
-  frame.hidden = true;
-
   const toolbar = createElement("div", "better-x-focus__toolbar");
   toolbar.setAttribute("aria-label", "Focus Mode keyboard shortcuts");
   toolbar.append(createShortcut(["↑", "↓"], "Navigate"));
@@ -153,10 +153,19 @@ const createFocusElements = (): FocusElements => {
     throw new Error("Focus Mode like label could not be created.");
   }
 
+  const motionShortcut = createShortcut(["A"], "Motion");
+  const motionLabel = motionShortcut.querySelector<HTMLSpanElement>(
+    ".better-x-focus__shortcut-label"
+  );
+  if (!motionLabel) {
+    throw new Error("Focus Mode motion label could not be created.");
+  }
+
   toolbar.append(
     likeShortcut,
     createShortcut(["R"], "Reply"),
     createShortcut(["↵"], "Open"),
+    motionShortcut,
     createShortcut(["Esc"], "Exit")
   );
 
@@ -164,16 +173,15 @@ const createFocusElements = (): FocusElements => {
   liveRegion.setAttribute("aria-live", "polite");
   liveRegion.setAttribute("role", "status");
 
-  host.append(backdropLayer, frame, toolbar, liveRegion);
+  host.append(backdropLayer, toolbar, liveRegion);
   document.body.append(host);
 
   return {
-    backdrop,
-    frame,
     hole,
     host,
     likeLabel,
     liveRegion,
+    motionLabel,
     toolbar,
   };
 };
@@ -205,20 +213,6 @@ const isReplyComposerOpen = (): boolean => {
   }
   const dialog = composer.closest('[role="dialog"]');
   return Boolean(dialog?.getClientRects().length);
-};
-
-const getPageTheme = (): PageTheme => {
-  const background = getComputedStyle(document.body).backgroundColor;
-  const channels = background
-    .match(/\d+(?:\.\d+)?/g)
-    ?.slice(0, 3)
-    .map(Number);
-  if (!channels || channels.length < 3) {
-    return "light";
-  }
-  const [red, green, blue] = channels;
-  const luminance = red * 0.299 + green * 0.587 + blue * 0.114;
-  return luminance < 100 ? "dark" : "light";
 };
 
 const getPostLink = (post: HTMLElement): HTMLAnchorElement | null => {
@@ -265,8 +259,10 @@ const findNearestVisiblePost = (): HTMLElement | null => {
   return nearestPost;
 };
 
-const focusScrollBehavior = (): ScrollBehavior =>
-  window.matchMedia(REDUCED_MOTION_QUERY).matches ? "auto" : "smooth";
+const focusScrollBehavior = (animationsEnabled: boolean): ScrollBehavior =>
+  animationsEnabled && !window.matchMedia(REDUCED_MOTION_QUERY).matches
+    ? "smooth"
+    : "auto";
 
 const getSpotlightRect = (post: HTMLElement): SpotlightRect => {
   const rect = post.getBoundingClientRect();
@@ -285,18 +281,24 @@ const getSpotlightRect = (post: HTMLElement): SpotlightRect => {
   };
 };
 
-const scrollPostIntoSpotlight = (post: HTMLElement): void => {
+const scrollPostIntoSpotlight = (
+  post: HTMLElement,
+  animationsEnabled: boolean
+): void => {
   const postRect = post.getBoundingClientRect();
   const spotlight = getSpotlightRect(post);
   const postTop = spotlight.top + FOCUS_OUTSET;
   window.scrollBy({
-    behavior: focusScrollBehavior(),
+    behavior: focusScrollBehavior(animationsEnabled),
     top: postRect.top - postTop,
   });
 };
 
 const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
-  const initialSettings = await focusSettings.getValue();
+  const [initialSettings, animationsEnabled] = await Promise.all([
+    focusSettings.getValue(),
+    focusAnimations.getValue(),
+  ]);
   if (ctx.isInvalid) {
     return;
   }
@@ -304,6 +306,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   const elements = createFocusElements();
   const state: FocusState = {
     activePost: null,
+    animationsEnabled,
     hasObservedReplyComposer: false,
     isActive: false,
     isReplying: false,
@@ -339,20 +342,23 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     }
   }
 
+  function updateMotionPreference(): void {
+    elements.host.dataset.animations = String(state.animationsEnabled);
+    elements.motionLabel.textContent = state.animationsEnabled
+      ? "Motion"
+      : "Instant";
+  }
+
   function updateGeometry(): void {
     geometryFrame = 0;
     const post = state.activePost;
     if (!(state.isActive && !state.isReplying && post?.isConnected)) {
-      elements.frame.hidden = true;
       elements.hole.setAttribute("height", "0");
       elements.hole.setAttribute("width", "0");
       return;
     }
 
     const { height, left, top, width } = getSpotlightRect(post);
-    const isVisible = width > 0 && height > 0;
-
-    elements.frame.hidden = !isVisible;
     elements.hole.setAttribute("height", String(height));
     elements.hole.setAttribute(
       "rx",
@@ -361,10 +367,6 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     elements.hole.setAttribute("width", String(width));
     elements.hole.setAttribute("x", String(left));
     elements.hole.setAttribute("y", String(top));
-    elements.frame.style.setProperty("--better-x-focus-height", `${height}px`);
-    elements.frame.style.setProperty("--better-x-focus-left", `${left}px`);
-    elements.frame.style.setProperty("--better-x-focus-top", `${top}px`);
-    elements.frame.style.setProperty("--better-x-focus-width", `${width}px`);
   }
 
   const scheduleGeometry = (): void => {
@@ -372,25 +374,6 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       return;
     }
     geometryFrame = ctx.requestAnimationFrame(updateGeometry);
-  };
-
-  const animateSelection = (): void => {
-    if (window.matchMedia(REDUCED_MOTION_QUERY).matches) {
-      return;
-    }
-    for (const animation of elements.frame.getAnimations()) {
-      animation.cancel();
-    }
-    elements.frame.animate(
-      [
-        { opacity: 0.45, scale: "0.985" },
-        { opacity: 1, scale: "1" },
-      ],
-      {
-        duration: OPEN_DURATION_MS,
-        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
-      }
-    );
   };
 
   const selectPost = (post: HTMLElement, shouldScroll = true): void => {
@@ -405,13 +388,12 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       state.activePost = post;
       post.setAttribute(ACTIVE_ATTRIBUTE, "true");
       activePostObserver.observe(post);
-      animateSelection();
     }
 
     updateLikeLabel();
     scheduleGeometry();
     if (shouldScroll) {
-      scrollPostIntoSpotlight(post);
+      scrollPostIntoSpotlight(post, state.animationsEnabled);
     }
   };
 
@@ -453,7 +435,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       window.clearTimeout(hideTimer);
       hideTimer = 0;
     }
-    elements.host.dataset.theme = getPageTheme();
+    updateMotionPreference();
     elements.host.hidden = false;
     ctx.requestAnimationFrame(() => {
       if (state.isActive && !state.isReplying) {
@@ -552,7 +534,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       window.clearTimeout(selectionTimer);
     }
     window.scrollBy({
-      behavior: focusScrollBehavior(),
+      behavior: focusScrollBehavior(state.animationsEnabled),
       top: direction * window.innerHeight * 0.72,
     });
     selectionTimer = ctx.setTimeout(() => {
@@ -603,6 +585,28 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     button.click();
     announce(wasLiked ? "Post unliked" : "Post liked");
     ctx.setTimeout(updateLikeLabel, OPEN_DURATION_MS);
+  };
+
+  const toggleAnimations = async (): Promise<void> => {
+    const previousValue = state.animationsEnabled;
+    const nextValue = !previousValue;
+    state.animationsEnabled = nextValue;
+    updateMotionPreference();
+    if (!nextValue) {
+      window.scrollTo({
+        behavior: "auto",
+        top: window.scrollY,
+      });
+    }
+    announce(nextValue ? "Animations on" : "Animations off");
+
+    try {
+      await focusAnimations.setValue(nextValue);
+    } catch {
+      state.animationsEnabled = previousValue;
+      updateMotionPreference();
+      announce("Animation preference could not be saved");
+    }
   };
 
   const replyToPost = (): void => {
@@ -674,6 +678,10 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     }
     if (event.key.toLowerCase() === "r") {
       replyToPost();
+      return true;
+    }
+    if (event.key.toLowerCase() === "a") {
+      toggleAnimations().catch((error: unknown) => window.reportError(error));
       return true;
     }
     return false;
@@ -768,10 +776,15 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       exitFocusMode();
     }
   });
+  const unwatchAnimations = focusAnimations.watch((enabled) => {
+    state.animationsEnabled = enabled;
+    updateMotionPreference();
+  });
 
   ctx.onInvalidated(() => {
     activePostObserver.disconnect();
     pageObserver.disconnect();
+    unwatchAnimations();
     unwatchSettings();
     if (geometryFrame) {
       window.cancelAnimationFrame(geometryFrame);

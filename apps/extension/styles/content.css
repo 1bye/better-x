@@ -1,9 +1,5 @@
 /* Keyboard-first spotlight layered over X's native timeline. */
 better-x-focus {
-  --better-x-focus-height: 0px;
-  --better-x-focus-left: 0px;
-  --better-x-focus-top: 0px;
-  --better-x-focus-width: 0px;
   position: fixed;
   inset: 0;
   z-index: 2147483646;
@@ -39,32 +35,6 @@ better-x-focus[data-open="true"] .better-x-focus__backdrop-layer {
 
 better-x-focus .better-x-focus__backdrop {
   opacity: 0.48;
-}
-
-better-x-focus .better-x-focus__frame {
-  position: fixed;
-  top: var(--better-x-focus-top);
-  left: var(--better-x-focus-left);
-  width: var(--better-x-focus-width);
-  height: var(--better-x-focus-height);
-  border: 1px solid rgb(255 255 255 / 42%);
-  border-radius: 18px;
-  box-shadow:
-    0 0 0 1px rgb(15 20 25 / 22%),
-    0 18px 70px rgb(0 0 0 / 24%);
-  transform-origin: center;
-  transition:
-    top 260ms cubic-bezier(0.4, 0, 0.2, 1),
-    left 260ms cubic-bezier(0.4, 0, 0.2, 1),
-    width 260ms cubic-bezier(0.4, 0, 0.2, 1),
-    height 260ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-better-x-focus[data-theme="light"] .better-x-focus__frame {
-  border-color: rgb(15 20 25 / 22%);
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 70%),
-    0 18px 70px rgb(15 20 25 / 18%);
 }
 
 better-x-focus .better-x-focus__toolbar {
@@ -142,6 +112,11 @@ better-x-focus .better-x-focus__live-region {
   clip: rect(0, 0, 0, 0);
 }
 
+better-x-focus[data-animations="false"] .better-x-focus__backdrop-layer,
+better-x-focus[data-animations="false"] .better-x-focus__toolbar {
+  transition: none;
+}
+
 @media (max-width: 680px) {
   better-x-focus .better-x-focus__toolbar {
     gap: 2px;
@@ -160,7 +135,6 @@ better-x-focus .better-x-focus__live-region {
 
 @media (prefers-reduced-motion: reduce) {
   better-x-focus .better-x-focus__backdrop-layer,
-  better-x-focus .better-x-focus__frame,
   better-x-focus .better-x-focus__toolbar {
     transition: none;
   }

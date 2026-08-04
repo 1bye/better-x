@@ -13,6 +13,7 @@ of the viewport stays fully visible while the surrounding page is dimmed.
 - `R` opens X's native reply composer.
 - `Enter` or `Arrow Right` opens the selected conversation.
 - `Arrow Left` returns after opening a conversation from Focus Mode.
+- `A` switches between animated and instant navigation.
 - `Escape` exits Focus Mode.
 
 Focus Mode operates on X's existing post elements and controls. It does not clone

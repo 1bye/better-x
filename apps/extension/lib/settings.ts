@@ -14,3 +14,10 @@ export const focusSettings = storage.defineItem<FocusSettings>(
     fallback: DEFAULT_FOCUS_SETTINGS,
   }
 );
+
+export const focusAnimations = storage.defineItem<boolean>(
+  "local:focus-animations",
+  {
+    fallback: true,
+  }
+);
