@@ -1,8 +1,11 @@
+import type { WorkspaceViewLayout } from "./view-layout.js";
+
 export const DESKTOP_IPC_CHANNELS = {
   command: "better-x:command",
   feedSelection: "better-x:feed-selection",
   getState: "better-x:get-state",
   stateChanged: "better-x:state-changed",
+  workspaceLayout: "better-x:workspace-layout",
 } as const;
 
 export type DesktopCommand = "home" | "reload";
@@ -23,6 +26,7 @@ export interface DesktopApi {
   ) => () => void;
   readonly platform: NodeJS.Platform;
   readonly sendCommand: (command: DesktopCommand) => void;
+  readonly setWorkspaceLayout: (layout: WorkspaceViewLayout) => void;
 }
 
 export const INITIAL_DESKTOP_STATE: DesktopShellState = {

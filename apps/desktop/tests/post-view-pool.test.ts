@@ -146,4 +146,24 @@ describe("PostViewPool", () => {
     expect(views.every((view) => view.webContents.closed)).toBe(true);
     expect(views.every((view) => !view.visible)).toBe(true);
   });
+
+  it("suspends and restores the active view without reloading it", async () => {
+    const { pool, views } = createHarness();
+    const bounds = { height: 700, width: 500, x: 7, y: 47 };
+    pool.setBounds(bounds);
+    await pool.select({
+      currentUrl: POST_A,
+      nextUrls: [POST_B, POST_C],
+    });
+    const activeView = views.find((view) => view.webContents.url === POST_A);
+    const loadCount = activeView?.webContents.loads.length;
+
+    pool.setSurfaceVisible(false);
+    expect(views.every((view) => !view.visible)).toBe(true);
+
+    pool.setBounds(bounds);
+    pool.setSurfaceVisible(true);
+    expect(activeView?.visible).toBe(true);
+    expect(activeView?.webContents.loads.length).toBe(loadCount);
+  });
 });

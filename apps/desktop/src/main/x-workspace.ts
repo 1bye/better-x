@@ -14,6 +14,8 @@ import {
 import {
   calculateDesktopViewLayout,
   DESKTOP_GEOMETRY,
+  type ViewBounds,
+  type WorkspaceViewLayout,
 } from "../shared/view-layout.js";
 import {
   isAllowedXNavigation,
@@ -58,6 +60,23 @@ interface XWorkspaceOptions {
 const failureMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const fitBoundsToWindow = (
+  bounds: ViewBounds,
+  width: number,
+  height: number
+): ViewBounds | null => {
+  const x = Math.min(bounds.x, width);
+  const y = Math.min(bounds.y, height);
+  const right = Math.min(bounds.x + bounds.width, width);
+  const bottom = Math.min(bounds.y + bounds.height, height);
+  const fittedWidth = Math.max(0, right - x);
+  const fittedHeight = Math.max(0, bottom - y);
+  if (fittedWidth === 0 || fittedHeight === 0) {
+    return null;
+  }
+  return { height: fittedHeight, width: fittedWidth, x, y };
+};
+
 const openExternal = (url: string): void => {
   if (!url.startsWith("https://")) {
     return;
@@ -72,6 +91,7 @@ const openExternal = (url: string): void => {
 export class XWorkspace {
   private readonly onStateChanged: (state: DesktopShellState) => void;
   private readonly postViewPool: PostViewPool;
+  private rendererLayout: WorkspaceViewLayout | null = null;
   private state: DesktopShellState = { ...INITIAL_DESKTOP_STATE };
   private readonly timelineView: WebContentsView;
   private readonly window: BrowserWindow;
@@ -180,19 +200,33 @@ export class XWorkspace {
     }
     const [width = 0, height = 0] = this.window.getContentSize();
     const isWorkspace = this.state.mode === "workspace";
-    const layout = calculateDesktopViewLayout(
+    const fallbackLayout = calculateDesktopViewLayout(
       width,
       height,
       isWorkspace ? "workspace" : "login"
     );
-    this.timelineView.setBounds({ ...layout.feed });
-    this.timelineView.setBorderRadius(DESKTOP_GEOMETRY.paneRadius);
-    this.timelineView.setVisible(true);
+    const layout =
+      isWorkspace && this.rendererLayout ? this.rendererLayout : fallbackLayout;
+    const feedBounds = layout.feed
+      ? fitBoundsToWindow(layout.feed, width, height)
+      : null;
+    const postBounds = layout.post
+      ? fitBoundsToWindow(layout.post, width, height)
+      : null;
 
-    if (layout.post) {
-      this.postViewPool.setBounds(layout.post);
+    if (feedBounds) {
+      this.timelineView.setBounds(feedBounds);
+      this.timelineView.setBorderRadius(DESKTOP_GEOMETRY.paneRadius);
+      this.timelineView.setVisible(true);
     } else {
-      this.postViewPool.hide();
+      this.timelineView.setVisible(false);
+    }
+
+    if (postBounds) {
+      this.postViewPool.setBounds(postBounds);
+      this.postViewPool.setSurfaceVisible(true);
+    } else {
+      this.postViewPool.setSurfaceVisible(false);
     }
   }
 
@@ -224,6 +258,16 @@ export class XWorkspace {
       return;
     }
     await this.postViewPool.select(selection);
+  }
+
+  setWorkspaceLayout(layout: WorkspaceViewLayout): void {
+    this.rendererLayout = {
+      feed: layout.feed ? { ...layout.feed } : null,
+      post: layout.post ? { ...layout.post } : null,
+    };
+    if (this.state.mode === "workspace") {
+      this.layout();
+    }
   }
 
   async start(): Promise<void> {

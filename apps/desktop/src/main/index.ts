@@ -14,6 +14,7 @@ import {
   INITIAL_DESKTOP_STATE,
   isDesktopCommand,
 } from "../shared/desktop-api.js";
+import { parseWorkspaceViewLayout } from "../shared/view-layout.js";
 import { parseXFeedSelection } from "../shared/x-post.js";
 import { XWorkspace } from "./x-workspace.js";
 
@@ -175,6 +176,18 @@ const registerIpc = (): void => {
       process.stderr.write(`Post selection failed: ${failureMessage(error)}\n`);
     });
   });
+  ipcMain.on(
+    DESKTOP_IPC_CHANNELS.workspaceLayout,
+    (event, payload: unknown) => {
+      if (event.sender !== mainWindow?.webContents) {
+        return;
+      }
+      const layout = parseWorkspaceViewLayout(payload);
+      if (layout) {
+        workspace?.setWorkspaceLayout(layout);
+      }
+    }
+  );
 };
 
 const start = async (): Promise<void> => {
@@ -206,6 +219,7 @@ app.on("before-quit", () => {
   ipcMain.removeHandler(DESKTOP_IPC_CHANNELS.getState);
   ipcMain.removeAllListeners(DESKTOP_IPC_CHANNELS.command);
   ipcMain.removeAllListeners(DESKTOP_IPC_CHANNELS.feedSelection);
+  ipcMain.removeAllListeners(DESKTOP_IPC_CHANNELS.workspaceLayout);
 });
 
 start().catch((error: unknown) => {

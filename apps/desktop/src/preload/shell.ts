@@ -36,6 +36,9 @@ const desktopApi: DesktopApi = {
   sendCommand: (command) => {
     ipcRenderer.send(DESKTOP_IPC_CHANNELS.command, command);
   },
+  setWorkspaceLayout: (layout) => {
+    ipcRenderer.send(DESKTOP_IPC_CHANNELS.workspaceLayout, layout);
+  },
 };
 
 contextBridge.exposeInMainWorld("betterX", desktopApi);

@@ -53,6 +53,7 @@ export class PostViewPool {
   private clock = 0;
   private readonly entries: PostViewEntry[];
   private selectionGeneration = 0;
+  private surfaceVisibility: "hidden" | "visible" = "visible";
 
   constructor({ capacity, createView, onStatusChanged }: PostViewPoolOptions) {
     if (!Number.isInteger(capacity) || capacity < 1) {
@@ -103,13 +104,14 @@ export class PostViewPool {
 
   hide(): void {
     this.selectionGeneration += 1;
+    this.activeEntry = null;
     for (const entry of this.entries) {
       entry.view.setVisible(false);
     }
     this.onStatusChanged({
       message: null,
       status: "idle",
-      url: this.activeEntry?.url ?? null,
+      url: null,
     });
   }
 
@@ -197,6 +199,19 @@ export class PostViewPool {
     }
   }
 
+  setSurfaceVisible(isVisible: boolean): void {
+    this.surfaceVisibility = isVisible ? "visible" : "hidden";
+    if (!isVisible) {
+      for (const entry of this.entries) {
+        entry.view.setVisible(false);
+      }
+      return;
+    }
+    if (this.activeEntry?.ready) {
+      this.show(this.activeEntry);
+    }
+  }
+
   private async loadEntry(entry: PostViewEntry, url: string): Promise<void> {
     if (entry.url === url && entry.ready) {
       return;
@@ -276,7 +291,9 @@ export class PostViewPool {
 
   private show(entry: PostViewEntry): void {
     for (const candidate of this.entries) {
-      candidate.view.setVisible(candidate === entry);
+      candidate.view.setVisible(
+        this.surfaceVisibility === "visible" && candidate === entry
+      );
     }
     if (this.bounds) {
       entry.view.setBounds(this.bounds);

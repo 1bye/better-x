@@ -1,6 +1,7 @@
 import { Button } from "@better-x/ui/components/button";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { HouseIcon } from "@phosphor-icons/react/dist/csr/House";
+import { SquaresFourIcon } from "@phosphor-icons/react/dist/csr/SquaresFour";
 import { XLogoIcon } from "@phosphor-icons/react/dist/csr/XLogo";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
@@ -8,6 +9,7 @@ import {
   type DesktopShellState,
   INITIAL_DESKTOP_STATE,
 } from "../../shared/desktop-api.js";
+import { WorkspaceDock } from "./workspace-dock.js";
 
 const statusLabel = (state: DesktopShellState): string => {
   if (state.mode === "error") {
@@ -32,6 +34,7 @@ const statusLabel = (state: DesktopShellState): string => {
 };
 
 export function App(): ReactElement {
+  const [layoutResetVersion, setLayoutResetVersion] = useState(0);
   const [state, setState] = useState<DesktopShellState>(INITIAL_DESKTOP_STATE);
 
   useEffect(() => {
@@ -66,8 +69,10 @@ export function App(): ReactElement {
   const reload = (): void => {
     window.betterX.sendCommand("reload");
   };
+  const resetLayout = (): void => {
+    setLayoutResetVersion((version) => version + 1);
+  };
   const isWorkspace = state.mode === "workspace";
-  const isPostLoading = state.postStatus === "loading";
 
   return (
     <div
@@ -124,38 +129,27 @@ export function App(): ReactElement {
               weight="bold"
             />
           </Button>
+          <Button
+            aria-label="Reset tile layout"
+            disabled={!isWorkspace}
+            onClick={resetLayout}
+            size="icon-sm"
+            title="Reset tile layout"
+            type="button"
+            variant="ghost"
+          >
+            <SquaresFourIcon aria-hidden className="size-3.5" weight="bold" />
+          </Button>
         </div>
       </header>
 
       <main
-        className="workspace-surface relative min-h-0 flex-1 border border-editor-hairline-strong bg-editor-surface"
+        className="workspace-surface relative min-h-0 flex-1"
         data-mode={state.mode}
         data-name="XWorkspace"
       >
         {isWorkspace ? (
-          <>
-            <section
-              aria-busy={isPostLoading}
-              aria-label="Selected X post"
-              className="post-placeholder"
-              data-status={state.postStatus}
-            >
-              <div aria-hidden className="placeholder-mark">
-                <XLogoIcon className="size-5" weight="bold" />
-              </div>
-              <h1>{isPostLoading ? "Loading post…" : "Point at a post"}</h1>
-              <p>
-                {state.postStatus === "error"
-                  ? (state.message ?? "This post could not be opened.")
-                  : "Pause over a post in the timeline. Nearby posts stay warm for fast switching."}
-              </p>
-            </section>
-            <section
-              aria-hidden
-              className="timeline-placeholder"
-              data-name="TimelinePlaceholder"
-            />
-          </>
+          <WorkspaceDock resetVersion={layoutResetVersion} state={state} />
         ) : (
           <section
             aria-live="polite"

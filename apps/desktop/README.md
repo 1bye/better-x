@@ -5,9 +5,12 @@ full post conversation.
 
 ## Interaction
 
-- X loads as a normal top-level browser page in the right pane.
-- Pause over a timeline post to load its complete conversation in the left pane.
+- X loads as a normal top-level browser page in the left tile.
+- Pause over a timeline post to load its complete conversation in the right tile.
 - The next two visible posts preload in a bounded three-view pool.
+- Drag tile tabs to split, reorder, or group the timeline and post as tabs.
+- Tile geometry persists across restarts; the titlebar layout control restores
+  the default side-by-side arrangement.
 - Home and reload controls remain in the native-style titlebar.
 - All replies, likes, bookmarks, media, and navigation remain user-driven X
   interactions.
