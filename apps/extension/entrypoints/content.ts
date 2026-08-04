@@ -6,16 +6,21 @@ import { type FocusSettings, focusSettings } from "../lib/settings";
 import "../styles/content.css";
 
 const ACTIVE_ATTRIBUTE = "data-better-x-focused";
+const BOUNDARY_SELECTION_DELAY_MS = 300;
 const CLOSE_DURATION_MS = 180;
 const FOCUS_ATTRIBUTE = "data-better-x-focus-mode";
+const FOCUS_BOTTOM_INSET = 82;
 const FOCUS_OUTSET = 5;
 const FOCUS_RADIUS = 18;
+const FOCUS_TOP_INSET = 18;
 const LIKE_SELECTOR = '[data-testid="like"], [data-testid="unlike"]';
 const OPEN_DURATION_MS = 240;
-const POSITION_TRACKING_DURATION_MS = 300;
 const POST_SELECTOR =
   '[data-testid="primaryColumn"] article[data-testid="tweet"]';
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+const REPLY_COMPOSER_SELECTOR =
+  '[role="dialog"] [data-testid^="tweetTextarea_"], [role="dialog"] [contenteditable="true"]';
+const REPLY_DETECTION_TIMEOUT_MS = 1200;
 const REPLY_SELECTOR = '[data-testid="reply"]';
 const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/\d+\/?$/;
 
@@ -34,9 +39,18 @@ interface FocusElements {
 
 interface FocusState {
   activePost: HTMLElement | null;
+  hasObservedReplyComposer: boolean;
   isActive: boolean;
+  isReplying: boolean;
   returnUrl: string | null;
   settings: FocusSettings;
+}
+
+interface SpotlightRect {
+  height: number;
+  left: number;
+  top: number;
+  width: number;
 }
 
 const createElement = <K extends keyof HTMLElementTagNameMap>(
@@ -65,8 +79,13 @@ const createShortcut = (
 ): HTMLSpanElement => {
   const shortcut = createElement("span", "better-x-focus__shortcut");
   const keyGroup = createElement("span", "better-x-focus__keys");
+  keyGroup.dataset.name = "KbdGroup";
+  keyGroup.dataset.slot = "kbd-group";
   for (const key of keys) {
-    keyGroup.append(createElement("kbd", undefined, key));
+    const keycap = createElement("kbd", undefined, key);
+    keycap.dataset.name = "Kbd";
+    keycap.dataset.slot = "kbd";
+    keyGroup.append(keycap);
   }
   shortcut.append(
     keyGroup,
@@ -175,6 +194,19 @@ const isFocusShortcut = (event: KeyboardEvent): boolean =>
   event.shiftKey &&
   !(event.altKey || event.ctrlKey || event.metaKey);
 
+const isReplyComposerOpen = (): boolean => {
+  const composer = document.querySelector(REPLY_COMPOSER_SELECTOR);
+  if (!composer) {
+    return false;
+  }
+  const nativeDialog = composer.closest<HTMLDialogElement>("dialog");
+  if (nativeDialog) {
+    return nativeDialog.open;
+  }
+  const dialog = composer.closest('[role="dialog"]');
+  return Boolean(dialog?.getClientRects().length);
+};
+
 const getPageTheme = (): PageTheme => {
   const background = getComputedStyle(document.body).backgroundColor;
   const channels = background
@@ -236,13 +268,30 @@ const findNearestVisiblePost = (): HTMLElement | null => {
 const focusScrollBehavior = (): ScrollBehavior =>
   window.matchMedia(REDUCED_MOTION_QUERY).matches ? "auto" : "smooth";
 
-const scrollPostIntoView = (post: HTMLElement): void => {
+const getSpotlightRect = (post: HTMLElement): SpotlightRect => {
   const rect = post.getBoundingClientRect();
-  const isTallPost = rect.height > window.innerHeight - 96;
-  post.scrollIntoView({
+  const availableHeight = Math.max(
+    0,
+    window.innerHeight - FOCUS_TOP_INSET - FOCUS_BOTTOM_INSET
+  );
+  const height = Math.min(rect.height + FOCUS_OUTSET * 2, availableHeight);
+  const left = Math.max(0, rect.left - FOCUS_OUTSET);
+  const right = Math.min(window.innerWidth, rect.right + FOCUS_OUTSET);
+  return {
+    height,
+    left,
+    top: FOCUS_TOP_INSET + (availableHeight - height) / 2,
+    width: Math.max(0, right - left),
+  };
+};
+
+const scrollPostIntoSpotlight = (post: HTMLElement): void => {
+  const postRect = post.getBoundingClientRect();
+  const spotlight = getSpotlightRect(post);
+  const postTop = spotlight.top + FOCUS_OUTSET;
+  window.scrollBy({
     behavior: focusScrollBehavior(),
-    block: isTallPost ? "start" : "center",
-    inline: "nearest",
+    top: postRect.top - postTop,
   });
 };
 
@@ -255,15 +304,16 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   const elements = createFocusElements();
   const state: FocusState = {
     activePost: null,
+    hasObservedReplyComposer: false,
     isActive: false,
+    isReplying: false,
     returnUrl: null,
     settings: initialSettings,
   };
 
   let geometryFrame = 0;
   let hideTimer = 0;
-  let positionTrackingEndTime = 0;
-  let positionTrackingFrame = 0;
+  let replyDetectionTimer = 0;
   let selectionTimer = 0;
 
   const activePostObserver = new ResizeObserver(() => {
@@ -292,20 +342,14 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   function updateGeometry(): void {
     geometryFrame = 0;
     const post = state.activePost;
-    if (!(state.isActive && post?.isConnected)) {
+    if (!(state.isActive && !state.isReplying && post?.isConnected)) {
       elements.frame.hidden = true;
       elements.hole.setAttribute("height", "0");
       elements.hole.setAttribute("width", "0");
       return;
     }
 
-    const rect = post.getBoundingClientRect();
-    const left = Math.max(0, rect.left - FOCUS_OUTSET);
-    const top = Math.max(0, rect.top - FOCUS_OUTSET);
-    const right = Math.min(window.innerWidth, rect.right + FOCUS_OUTSET);
-    const bottom = Math.min(window.innerHeight, rect.bottom + FOCUS_OUTSET);
-    const width = Math.max(0, right - left);
-    const height = Math.max(0, bottom - top);
+    const { height, left, top, width } = getSpotlightRect(post);
     const isVisible = width > 0 && height > 0;
 
     elements.frame.hidden = !isVisible;
@@ -328,25 +372,6 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       return;
     }
     geometryFrame = ctx.requestAnimationFrame(updateGeometry);
-  };
-
-  const trackPosition = (): void => {
-    positionTrackingEndTime =
-      window.performance.now() + POSITION_TRACKING_DURATION_MS;
-    if (positionTrackingFrame) {
-      return;
-    }
-    const trackFrame = (): void => {
-      positionTrackingFrame = 0;
-      scheduleGeometry();
-      if (
-        state.isActive &&
-        window.performance.now() < positionTrackingEndTime
-      ) {
-        positionTrackingFrame = ctx.requestAnimationFrame(trackFrame);
-      }
-    };
-    trackFrame();
   };
 
   const animateSelection = (): void => {
@@ -386,8 +411,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     updateLikeLabel();
     scheduleGeometry();
     if (shouldScroll) {
-      scrollPostIntoView(post);
-      trackPosition();
+      scrollPostIntoSpotlight(post);
     }
   };
 
@@ -400,7 +424,31 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     return true;
   };
 
+  const clearReplyDetectionTimer = (): void => {
+    if (!replyDetectionTimer) {
+      return;
+    }
+    window.clearTimeout(replyDetectionTimer);
+    replyDetectionTimer = 0;
+  };
+
+  const hideFocusSurface = (): void => {
+    delete elements.host.dataset.open;
+    if (hideTimer) {
+      window.clearTimeout(hideTimer);
+    }
+    hideTimer = ctx.setTimeout(() => {
+      if (!state.isActive || state.isReplying) {
+        elements.host.hidden = true;
+      }
+      hideTimer = 0;
+    }, CLOSE_DURATION_MS);
+  };
+
   const showFocusSurface = (): void => {
+    if (!(state.isActive && !state.isReplying)) {
+      return;
+    }
     if (hideTimer) {
       window.clearTimeout(hideTimer);
       hideTimer = 0;
@@ -408,21 +456,26 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     elements.host.dataset.theme = getPageTheme();
     elements.host.hidden = false;
     ctx.requestAnimationFrame(() => {
-      if (state.isActive) {
+      if (state.isActive && !state.isReplying) {
         elements.host.dataset.open = "true";
       }
     });
   };
 
   const enterFocusMode = (): void => {
-    if (!(state.settings.enabled && selectNearestPost())) {
+    if (!state.settings.enabled) {
+      return;
+    }
+    const post = findNearestVisiblePost();
+    if (!post) {
       return;
     }
     state.isActive = true;
+    state.isReplying = false;
     state.returnUrl = null;
     document.documentElement.setAttribute(FOCUS_ATTRIBUTE, "true");
     showFocusSurface();
-    scheduleGeometry();
+    selectPost(post);
     announce("Focus Mode on");
   };
 
@@ -431,20 +484,67 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       return;
     }
     state.isActive = false;
+    state.hasObservedReplyComposer = false;
+    state.isReplying = false;
     state.returnUrl = null;
+    clearReplyDetectionTimer();
     document.documentElement.removeAttribute(FOCUS_ATTRIBUTE);
-    delete elements.host.dataset.open;
     if (state.activePost) {
       activePostObserver.unobserve(state.activePost);
       state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
       state.activePost = null;
     }
-    hideTimer = ctx.setTimeout(() => {
-      if (!state.isActive) {
-        elements.host.hidden = true;
+    hideFocusSurface();
+  };
+
+  const resumeFocusSurface = (): void => {
+    if (!state.isReplying) {
+      return;
+    }
+    clearReplyDetectionTimer();
+    state.hasObservedReplyComposer = false;
+    state.isReplying = false;
+    if (!state.isActive) {
+      return;
+    }
+    if (!(state.activePost?.isConnected || selectNearestPost())) {
+      exitFocusMode();
+      return;
+    }
+    document.documentElement.setAttribute(FOCUS_ATTRIBUTE, "true");
+    state.activePost?.setAttribute(ACTIVE_ATTRIBUTE, "true");
+    showFocusSurface();
+    scheduleGeometry();
+  };
+
+  const suspendFocusSurfaceForReply = (): void => {
+    state.hasObservedReplyComposer = false;
+    state.isReplying = true;
+    document.documentElement.removeAttribute(FOCUS_ATTRIBUTE);
+    state.activePost?.removeAttribute(ACTIVE_ATTRIBUTE);
+    hideFocusSurface();
+    clearReplyDetectionTimer();
+    replyDetectionTimer = ctx.setTimeout(() => {
+      if (state.isReplying && !state.hasObservedReplyComposer) {
+        resumeFocusSurface();
       }
-      hideTimer = 0;
-    }, CLOSE_DURATION_MS);
+    }, REPLY_DETECTION_TIMEOUT_MS);
+  };
+
+  const syncReplySurface = (): boolean => {
+    if (!state.isReplying) {
+      return false;
+    }
+    const hasReplyComposer = isReplyComposerOpen();
+    if (hasReplyComposer) {
+      state.hasObservedReplyComposer = true;
+      clearReplyDetectionTimer();
+      return true;
+    }
+    if (state.hasObservedReplyComposer) {
+      resumeFocusSurface();
+    }
+    return true;
   };
 
   const scheduleBoundarySelection = (direction: NavigationDirection): void => {
@@ -455,7 +555,6 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       behavior: focusScrollBehavior(),
       top: direction * window.innerHeight * 0.72,
     });
-    trackPosition();
     selectionTimer = ctx.setTimeout(() => {
       selectionTimer = 0;
       const posts = getPosts();
@@ -468,8 +567,8 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
         selectPost(nextPost);
         return;
       }
-      selectNearestPost();
-    }, POSITION_TRACKING_DURATION_MS);
+      selectNearestPost(true);
+    }, BOUNDARY_SELECTION_DELAY_MS);
   };
 
   const moveSelection = (direction: NavigationDirection): void => {
@@ -513,6 +612,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       announce("Reply is unavailable for this post");
       return;
     }
+    suspendFocusSurfaceForReply();
     button.click();
     announce("Reply composer opened");
   };
@@ -583,6 +683,9 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     if (isEditableTarget(event.target)) {
       return;
     }
+    if (state.isReplying) {
+      return;
+    }
     if (isFocusShortcut(event)) {
       if (!state.settings.enabled) {
         return;
@@ -637,6 +740,9 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     if (!state.isActive) {
       return;
     }
+    if (syncReplySurface()) {
+      return;
+    }
     if (!state.activePost?.isConnected) {
       if (state.activePost) {
         activePostObserver.unobserve(state.activePost);
@@ -650,6 +756,8 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     scheduleGeometry();
   });
   pageObserver.observe(document.body, {
+    attributeFilter: ["aria-hidden", "open"],
+    attributes: true,
     childList: true,
     subtree: true,
   });
@@ -671,9 +779,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     if (hideTimer) {
       window.clearTimeout(hideTimer);
     }
-    if (positionTrackingFrame) {
-      window.cancelAnimationFrame(positionTrackingFrame);
-    }
+    clearReplyDetectionTimer();
     if (selectionTimer) {
       window.clearTimeout(selectionTimer);
     }

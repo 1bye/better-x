@@ -17,7 +17,8 @@ of the viewport stays fully visible while the surrounding page is dimmed.
 
 Focus Mode operates on X's existing post elements and controls. It does not clone
 posts, load embeds, or create a second conversation view, so authenticated actions,
-media, and replies remain native to X.
+media, and replies remain native to X. The spotlight is suspended while the native
+reply composer is open and returns when the composer closes.
 
 ## Development
 

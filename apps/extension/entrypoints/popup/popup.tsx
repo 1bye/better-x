@@ -122,7 +122,9 @@ function Popup() {
           <span className="shortcut" key={shortcut.label}>
             <span className="shortcut__keys">
               {shortcut.keys.map((key) => (
-                <kbd key={key}>{key}</kbd>
+                <kbd data-name="Kbd" data-slot="kbd" key={key}>
+                  {key}
+                </kbd>
               ))}
             </span>
             <span>{shortcut.label}</span>
