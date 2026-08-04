@@ -1,4 +1,3 @@
-/* Extension action popup. */
 .popup {
   min-height: 100%;
   padding: 18px;
@@ -72,75 +71,98 @@
   background: #00ba7c;
 }
 
-.layout-preview {
+.focus-preview {
+  position: relative;
   display: grid;
-  grid-template-columns: 24px 1fr 1.18fr;
-  gap: 5px;
-  height: 92px;
-  padding: 8px;
+  grid-template-columns: 28px 1fr;
+  gap: 7px;
+  height: 132px;
+  padding: 9px;
   margin: 18px 0 12px;
   overflow: hidden;
-  background: #f7f9f9;
-  border: 1px solid #eff3f4;
-  border-radius: 15px;
+  background: #eef1f3;
+  border: 1px solid #e1e6e9;
+  border-radius: 16px;
 }
 
-.layout-preview > span {
-  display: flex;
+.focus-preview__nav {
   background: #fff;
-  border: 1px solid #e5e9eb;
-  border-radius: 7px;
+  border: 1px solid #dfe5e8;
+  border-radius: 8px;
 }
 
-.layout-preview__nav {
-  background: #0f1419 !important;
-  border-color: #0f1419 !important;
-}
-
-.layout-preview__feed {
-  flex-direction: column;
-  gap: 4px;
-  padding: 5px;
-}
-
-.layout-preview__feed i {
-  display: block;
-  height: 18px;
-  background: #dfe5e8;
-  border-radius: 3px;
-}
-
-.layout-preview__feed i:nth-child(2) {
-  background: #d9effd;
-  box-shadow: inset 2px 0 #1d9bf0;
-}
-
-.layout-preview__reader {
+.focus-preview__page {
+  display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 8px;
+  padding: 7px 19px;
+  background: #fff;
+  border: 1px solid #dfe5e8;
+  border-radius: 8px;
 }
 
-.layout-preview__reader i {
+.focus-preview__page i {
   display: block;
-  width: 68%;
-  height: 7px;
-  background: #0f1419;
-  border-radius: 3px;
-  opacity: 0.85;
+  height: 24px;
+  background: #e9edef;
+  border-radius: 5px;
 }
 
-.layout-preview__reader i + i {
-  width: 100%;
-  height: 42px;
-  background: #dfe5e8;
-  opacity: 1;
+.focus-preview__page .focus-preview__post {
+  position: relative;
+  z-index: 2;
+  height: 50px;
+  background:
+    linear-gradient(#17212a 0 0) 9px 9px / 46% 5px no-repeat,
+    linear-gradient(#9ba8b0 0 0) 9px 19px / 72% 4px no-repeat,
+    linear-gradient(#d7dde0 0 0) 9px 29px / calc(100% - 18px) 13px no-repeat,
+    #fff;
+  border: 1px solid #d8e0e4;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(15 20 25 / 18%);
 }
 
-.settings {
-  overflow: hidden;
-  border: 1px solid #eff3f4;
-  border-radius: 15px;
+.focus-preview__shade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgb(15 20 25 / 48%);
+}
+
+.focus-preview__spotlight {
+  position: absolute;
+  top: 41px;
+  right: 28px;
+  left: 71px;
+  z-index: 2;
+  height: 54px;
+  border: 1px solid rgb(255 255 255 / 58%);
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 999px rgb(15 20 25 / 2%),
+    0 10px 28px rgb(15 20 25 / 20%);
+}
+
+.focus-preview__toolbar {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  background: rgb(24 24 27 / 92%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 9px;
+  box-shadow: 0 7px 20px rgb(0 0 0 / 26%);
+  transform: translateX(-50%);
+}
+
+.focus-preview__toolbar i {
+  width: 18px;
+  height: 12px;
+  background: rgb(255 255 255 / 14%);
+  border-radius: 4px;
 }
 
 .setting {
@@ -148,18 +170,16 @@
   gap: 14px;
   align-items: center;
   justify-content: space-between;
-  min-height: 64px;
-  padding: 11px 12px;
+  min-height: 68px;
+  padding: 12px;
   cursor: pointer;
-}
-
-.setting + .setting {
-  border-top: 1px solid #eff3f4;
+  border: 1px solid #eff3f4;
+  border-radius: 15px;
 }
 
 .setting__copy {
   display: grid;
-  gap: 3px;
+  gap: 4px;
 }
 
 .setting__copy strong {
@@ -168,7 +188,7 @@
 }
 
 .setting__copy > span {
-  max-width: 200px;
+  max-width: 210px;
   font-size: 10px;
   line-height: 14px;
   color: #536471;
@@ -227,6 +247,53 @@
   opacity: 0.45;
 }
 
+.shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 12px;
+  overflow: hidden;
+  background: #eff3f4;
+  border: 1px solid #eff3f4;
+  border-radius: 15px;
+}
+
+.shortcut {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-height: 38px;
+  padding: 7px 9px;
+  font-size: 10px;
+  color: #536471;
+  background: #fff;
+}
+
+.shortcut:first-child {
+  grid-column: 1 / -1;
+}
+
+.shortcut__keys {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.shortcut kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 750;
+  color: #0f1419;
+  background: #f0f2f3;
+  border: 1px solid #dfe5e8;
+  border-radius: 5px;
+}
+
 .popup__footer {
   min-height: 31px;
   padding: 12px 4px 0;
@@ -234,16 +301,6 @@
   line-height: 15px;
   color: #536471;
   text-align: center;
-}
-
-.popup__footer kbd {
-  padding: 1px 5px;
-  font: inherit;
-  font-weight: 750;
-  color: #0f1419;
-  background: #f0f2f3;
-  border: 1px solid #dfe5e8;
-  border-radius: 4px;
 }
 
 .popup__error {
@@ -263,50 +320,59 @@
 
   .popup__heading > span,
   .setting__copy > span,
+  .shortcut,
   .popup__footer {
     color: #71767b;
   }
 
-  .layout-preview,
-  .settings,
-  .setting + .setting {
-    border-color: #2f3336;
-  }
-
-  .layout-preview {
-    background: #16181c;
-  }
-
-  .layout-preview > span {
-    background: #000;
-    border-color: #2f3336;
-  }
-
-  .layout-preview__nav {
-    background: #e7e9ea !important;
-    border-color: #e7e9ea !important;
-  }
-
-  .layout-preview__reader i {
-    background: #e7e9ea;
-  }
-
-  .layout-preview__feed i,
-  .layout-preview__reader i + i {
-    background: #2f3336;
-  }
-
   .status {
-    color: #71767b;
+    color: #a8b3ba;
     background: #16181c;
   }
 
   .status--enabled {
-    color: #2dd4a0;
-    background: rgb(0 186 124 / 14%);
+    color: #5ed9ad;
+    background: #092d23;
   }
 
-  .popup__footer kbd {
+  .focus-preview {
+    background: #0f1113;
+    border-color: #2f3336;
+  }
+
+  .focus-preview__nav,
+  .focus-preview__page {
+    background-color: #000;
+    border-color: #2f3336;
+  }
+
+  .focus-preview__page i {
+    background: #16181c;
+  }
+
+  .focus-preview__page .focus-preview__post {
+    background:
+      linear-gradient(#e7e9ea 0 0) 9px 9px / 46% 5px no-repeat,
+      linear-gradient(#71767b 0 0) 9px 19px / 72% 4px no-repeat,
+      linear-gradient(#202327 0 0) 9px 29px / calc(100% - 18px) 13px no-repeat,
+      #000;
+    border-color: #3a3f43;
+  }
+
+  .setting,
+  .shortcuts {
+    border-color: #2f3336;
+  }
+
+  .shortcuts {
+    background: #2f3336;
+  }
+
+  .shortcut {
+    background: #000;
+  }
+
+  .shortcut kbd {
     color: #e7e9ea;
     background: #16181c;
     border-color: #2f3336;

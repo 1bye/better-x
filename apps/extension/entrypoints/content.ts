@@ -1,57 +1,42 @@
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { defineContentScript } from "wxt/utils/define-content-script";
 
-import { type ReaderSettings, readerSettings } from "../lib/settings";
+import { type FocusSettings, focusSettings } from "../lib/settings";
 
 import "../styles/content.css";
 
-const ACTIVE_ATTRIBUTE = "data-better-x-active";
-const EMBED_LOAD_DELAY = 180;
-const EMBED_URL = "https://platform.twitter.com/embed/Tweet.html";
-const LANGUAGE_PATTERN = /^([a-z]{2,3})(?:-|$)/i;
-const MINIMUM_SPLIT_WIDTH = 1040;
-const PRIMARY_COLUMN_SELECTOR = '[data-testid="primaryColumn"]';
-const PROFILE_PATH_PATTERN = /^\/[a-zA-Z0-9_]{1,30}\/?$/;
-const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/(\d+)\/?$/;
-const SUPPORTED_ROUTES = new Set([
-  "/bookmarks",
-  "/explore",
-  "/home",
-  "/notifications",
-  "/search",
-]);
-const TRAILING_SLASH_PATTERN = /\/$/;
+const ACTIVE_ATTRIBUTE = "data-better-x-focused";
+const CLOSE_DURATION_MS = 180;
+const FOCUS_ATTRIBUTE = "data-better-x-focus-mode";
+const FOCUS_OUTSET = 5;
+const FOCUS_RADIUS = 18;
+const LIKE_SELECTOR = '[data-testid="like"], [data-testid="unlike"]';
+const OPEN_DURATION_MS = 240;
+const POSITION_TRACKING_DURATION_MS = 300;
+const POST_SELECTOR =
+  '[data-testid="primaryColumn"] article[data-testid="tweet"]';
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+const REPLY_SELECTOR = '[data-testid="reply"]';
+const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/\d+\/?$/;
 
-type EmbedStatus = "error" | "idle" | "loading" | "ready";
-type ReaderTheme = "dark" | "light";
+type NavigationDirection = -1 | 1;
+type PageTheme = "dark" | "light";
 
-interface PointerPosition {
-  x: number;
-  y: number;
-}
-
-interface ReaderElements {
-  closeButton: HTMLButtonElement;
-  embedFrame: HTMLIFrameElement;
-  footerMode: HTMLSpanElement;
+interface FocusElements {
+  backdrop: SVGRectElement;
+  frame: HTMLDivElement;
+  hole: SVGRectElement;
   host: HTMLElement;
-  openLink: HTMLAnchorElement;
-  pinButton: HTMLButtonElement;
-  placeholder: HTMLDivElement;
-  placeholderCopy: HTMLSpanElement;
-  placeholderTitle: HTMLElement;
-  status: HTMLSpanElement;
+  likeLabel: HTMLSpanElement;
+  liveRegion: HTMLSpanElement;
+  toolbar: HTMLElement;
 }
 
-interface ReaderState {
-  activePostUrl: string | null;
-  activeSource: HTMLElement | null;
-  embedStatus: EmbedStatus;
-  embedTheme: ReaderTheme | null;
-  isPinned: boolean;
-  lastPointer: PointerPosition | null;
-  loadedPostUrl: string | null;
-  settings: ReaderSettings;
+interface FocusState {
+  activePost: HTMLElement | null;
+  isActive: boolean;
+  returnUrl: string | null;
+  settings: FocusSettings;
 }
 
 const createElement = <K extends keyof HTMLElementTagNameMap>(
@@ -69,181 +54,133 @@ const createElement = <K extends keyof HTMLElementTagNameMap>(
   return element;
 };
 
-const createReaderElements = (): ReaderElements => {
-  const host = document.createElement("better-x-reader");
+const createSvgElement = <K extends keyof SVGElementTagNameMap>(
+  tagName: K
+): SVGElementTagNameMap[K] =>
+  document.createElementNS("http://www.w3.org/2000/svg", tagName);
+
+const createShortcut = (
+  keys: readonly string[],
+  label: string
+): HTMLSpanElement => {
+  const shortcut = createElement("span", "better-x-focus__shortcut");
+  const keyGroup = createElement("span", "better-x-focus__keys");
+  for (const key of keys) {
+    keyGroup.append(createElement("kbd", undefined, key));
+  }
+  shortcut.append(
+    keyGroup,
+    createElement("span", "better-x-focus__shortcut-label", label)
+  );
+  return shortcut;
+};
+
+const createFocusElements = (): FocusElements => {
+  const host = document.createElement("better-x-focus");
   host.hidden = true;
-  host.setAttribute("aria-label", "Better X embedded post reader");
+  host.setAttribute("aria-label", "Better X Focus Mode");
 
-  const reader = createElement("aside", "better-x-reader");
-  reader.setAttribute("aria-label", "Selected X post");
+  const maskId = "better-x-focus-mask";
+  const backdropLayer = createSvgElement("svg");
+  backdropLayer.classList.add("better-x-focus__backdrop-layer");
+  backdropLayer.setAttribute("aria-hidden", "true");
+  backdropLayer.setAttribute("preserveAspectRatio", "none");
 
-  const toolbar = createElement("header", "better-x-reader__toolbar");
-  const brand = createElement("div", "better-x-reader__brand");
-  const mark = createElement("span", "better-x-reader__mark", "BX");
-  mark.setAttribute("aria-hidden", "true");
+  const definitions = createSvgElement("defs");
+  const mask = createSvgElement("mask");
+  mask.id = maskId;
+  mask.setAttribute("height", "100%");
+  mask.setAttribute("maskContentUnits", "userSpaceOnUse");
+  mask.setAttribute("maskUnits", "userSpaceOnUse");
+  mask.setAttribute("width", "100%");
+  mask.setAttribute("x", "0");
+  mask.setAttribute("y", "0");
 
-  const titles = createElement("div", "better-x-reader__titles");
-  const title = createElement("span", "better-x-reader__title", "Post");
-  const status = createElement(
-    "span",
-    "better-x-reader__status",
-    "Following cursor"
+  const maskFill = createSvgElement("rect");
+  maskFill.setAttribute("fill", "white");
+  maskFill.setAttribute("height", "100%");
+  maskFill.setAttribute("width", "100%");
+
+  const hole = createSvgElement("rect");
+  hole.classList.add("better-x-focus__hole");
+  hole.setAttribute("fill", "black");
+  hole.setAttribute("height", "0");
+  hole.setAttribute("rx", String(FOCUS_RADIUS));
+  hole.setAttribute("width", "0");
+
+  const backdrop = createSvgElement("rect");
+  backdrop.classList.add("better-x-focus__backdrop");
+  backdrop.setAttribute("fill", "black");
+  backdrop.setAttribute("height", "100%");
+  backdrop.setAttribute("mask", `url(#${maskId})`);
+  backdrop.setAttribute("width", "100%");
+
+  mask.append(maskFill, hole);
+  definitions.append(mask);
+  backdropLayer.append(definitions, backdrop);
+
+  const frame = createElement("div", "better-x-focus__frame");
+  frame.hidden = true;
+
+  const toolbar = createElement("div", "better-x-focus__toolbar");
+  toolbar.setAttribute("aria-label", "Focus Mode keyboard shortcuts");
+  toolbar.append(createShortcut(["↑", "↓"], "Navigate"));
+
+  const likeShortcut = createShortcut(["L"], "Like");
+  const likeLabel = likeShortcut.querySelector<HTMLSpanElement>(
+    ".better-x-focus__shortcut-label"
   );
-  titles.append(title, status);
-  brand.append(mark, titles);
+  if (!likeLabel) {
+    throw new Error("Focus Mode like label could not be created.");
+  }
 
-  const actions = createElement("div", "better-x-reader__actions");
-  const pinButton = createElement(
-    "button",
-    "better-x-reader__button better-x-reader__button--pin",
-    "Pin"
+  toolbar.append(
+    likeShortcut,
+    createShortcut(["R"], "Reply"),
+    createShortcut(["↵"], "Open"),
+    createShortcut(["Esc"], "Exit")
   );
-  pinButton.type = "button";
-  pinButton.disabled = true;
-  pinButton.setAttribute("aria-pressed", "false");
-  pinButton.title = "Keep this post selected (P)";
 
-  const openLink = createElement(
-    "a",
-    "better-x-reader__open",
-    "View replies ↗"
-  );
-  openLink.hidden = true;
-  openLink.rel = "noopener";
-  openLink.target = "_blank";
+  const liveRegion = createElement("span", "better-x-focus__live-region");
+  liveRegion.setAttribute("aria-live", "polite");
+  liveRegion.setAttribute("role", "status");
 
-  const closeButton = createElement(
-    "button",
-    "better-x-reader__button better-x-reader__button--icon",
-    "×"
-  );
-  closeButton.type = "button";
-  closeButton.setAttribute("aria-label", "Turn off Better X");
-  closeButton.title = "Turn off Better X";
-
-  actions.append(pinButton, openLink, closeButton);
-  toolbar.append(brand, actions);
-
-  const viewport = createElement("div", "better-x-reader__viewport");
-  const embedFrame = createElement("iframe", "better-x-reader__embed");
-  embedFrame.allow =
-    "autoplay; encrypted-media; fullscreen; picture-in-picture; web-share";
-  embedFrame.hidden = true;
-  embedFrame.loading = "eager";
-  embedFrame.referrerPolicy = "strict-origin-when-cross-origin";
-  embedFrame.title = "Official X embedded post";
-
-  const placeholder = createElement("div", "better-x-reader__placeholder");
-  placeholder.setAttribute("aria-live", "polite");
-  placeholder.setAttribute("role", "status");
-  const placeholderIcon = createElement(
-    "span",
-    "better-x-reader__placeholder-icon",
-    "𝕏"
-  );
-  placeholderIcon.setAttribute("aria-hidden", "true");
-  const placeholderTitle = createElement(
-    "strong",
-    "better-x-reader__placeholder-title",
-    "Choose a post"
-  );
-  const placeholderCopy = createElement(
-    "span",
-    "better-x-reader__placeholder-copy",
-    "Pause over a post to load its official X embed here."
-  );
-  placeholder.append(placeholderIcon, placeholderTitle, placeholderCopy);
-  viewport.append(embedFrame, placeholder);
-
-  const footer = createElement("footer", "better-x-reader__footer");
-  const footerMode = createElement("span", undefined, "Official X embed");
-  const shortcut = createElement("kbd", undefined, "P");
-  const shortcutCopy = createElement(
-    "span",
-    undefined,
-    "to pin · Esc to resume"
-  );
-  footer.append(footerMode, shortcut, shortcutCopy);
-
-  reader.append(toolbar, viewport, footer);
-  host.append(reader);
+  host.append(backdropLayer, frame, toolbar, liveRegion);
   document.body.append(host);
 
   return {
-    closeButton,
-    embedFrame,
-    footerMode,
+    backdrop,
+    frame,
+    hole,
     host,
-    openLink,
-    pinButton,
-    placeholder,
-    placeholderCopy,
-    placeholderTitle,
-    status,
+    likeLabel,
+    liveRegion,
+    toolbar,
   };
-};
-
-const getPostUrl = (article: HTMLElement): string | null => {
-  const links = article.querySelectorAll<HTMLAnchorElement>("a[href]");
-  let fallbackUrl: string | null = null;
-  for (const link of links) {
-    const url = new URL(link.href, window.location.origin);
-    if (
-      url.origin === window.location.origin &&
-      STATUS_PATH_PATTERN.test(url.pathname)
-    ) {
-      if (link.querySelector("time")) {
-        return url.href;
-      }
-      fallbackUrl ??= url.href;
-    }
-  }
-  return fallbackUrl;
-};
-
-const getPostId = (postUrl: string): string | null => {
-  const match = new URL(postUrl).pathname.match(STATUS_PATH_PATTERN);
-  return match?.[1] ?? null;
-};
-
-const getEmbedLanguage = (): string => {
-  const language = document.documentElement.lang.match(LANGUAGE_PATTERN)?.[1];
-  return language?.toLowerCase() ?? "en";
-};
-
-const getEmbedUrl = (postUrl: string, theme: ReaderTheme): string | null => {
-  const postId = getPostId(postUrl);
-  if (!postId) {
-    return null;
-  }
-
-  const url = new URL(EMBED_URL);
-  url.searchParams.set("dnt", "true");
-  url.searchParams.set("id", postId);
-  url.searchParams.set("lang", getEmbedLanguage());
-  url.searchParams.set("theme", theme);
-  return url.href;
 };
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof Element)) {
     return false;
   }
-  return target.matches("input, textarea, select, [contenteditable='true']");
-};
-
-const isSupportedRoute = (): boolean => {
-  const normalizedPath =
-    window.location.pathname.replace(TRAILING_SLASH_PATTERN, "") || "/";
-  return (
-    SUPPORTED_ROUTES.has(normalizedPath) ||
-    PROFILE_PATH_PATTERN.test(normalizedPath)
+  return Boolean(
+    target.closest(
+      "input, textarea, select, [contenteditable]:not([contenteditable='false'])"
+    )
   );
 };
 
-const getPageTheme = (): ReaderTheme => {
+const isFocusShortcut = (event: KeyboardEvent): boolean =>
+  event.code === "KeyF" &&
+  event.shiftKey &&
+  !(event.altKey || event.ctrlKey || event.metaKey);
+
+const getPageTheme = (): PageTheme => {
   const background = getComputedStyle(document.body).backgroundColor;
-  const channels = background.match(/\d+/g)?.slice(0, 3).map(Number);
+  const channels = background
+    .match(/\d+(?:\.\d+)?/g)
+    ?.slice(0, 3)
+    .map(Number);
   if (!channels || channels.length < 3) {
     return "light";
   }
@@ -252,459 +189,502 @@ const getPageTheme = (): ReaderTheme => {
   return luminance < 100 ? "dark" : "light";
 };
 
-const getArticleFromTarget = (
-  target: EventTarget | null
-): HTMLElement | null => {
-  if (!(target instanceof Element)) {
-    return null;
+const getPostLink = (post: HTMLElement): HTMLAnchorElement | null => {
+  const links = post.querySelectorAll<HTMLAnchorElement>("a[href]");
+  let fallbackLink: HTMLAnchorElement | null = null;
+  for (const link of links) {
+    const url = new URL(link.href, window.location.origin);
+    if (
+      url.origin !== window.location.origin ||
+      !STATUS_PATH_PATTERN.test(url.pathname)
+    ) {
+      continue;
+    }
+    if (link.querySelector("time")) {
+      return link;
+    }
+    fallbackLink ??= link;
   }
-  const article = target.closest<HTMLElement>('article[data-testid="tweet"]');
-  const primaryColumn = article?.closest(PRIMARY_COLUMN_SELECTOR);
-  return primaryColumn ? article : null;
+  return fallbackLink;
 };
 
-const getAnchorY = (
-  pointer: PointerPosition | null,
-  viewportHeight: number
-): number => {
-  const defaultY = viewportHeight * 0.38;
-  const pointerY = pointer ? pointer.y : defaultY;
-  return pointerY < 100 || pointerY > viewportHeight - 100
-    ? defaultY
-    : pointerY;
-};
-
-const findArticleAtAnchor = (
-  primaryColumn: Element,
-  anchorY: number
-): HTMLElement | null => {
-  const articles = primaryColumn.querySelectorAll<HTMLElement>(
-    'article[data-testid="tweet"]'
+const getPosts = (): readonly HTMLElement[] =>
+  Array.from(document.querySelectorAll<HTMLElement>(POST_SELECTOR)).filter(
+    (post) => post.isConnected && getPostLink(post)
   );
-  let closestArticle: HTMLElement | null = null;
-  let closestDistance = Number.POSITIVE_INFINITY;
 
-  for (const article of articles) {
-    const rect = article.getBoundingClientRect();
+const findNearestVisiblePost = (): HTMLElement | null => {
+  const viewportCenter = window.innerHeight / 2;
+  let nearestPost: HTMLElement | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const post of getPosts()) {
+    const rect = post.getBoundingClientRect();
     if (rect.bottom <= 0 || rect.top >= window.innerHeight) {
       continue;
     }
-    if (rect.top <= anchorY && rect.bottom >= anchorY) {
-      return article;
-    }
-    const distance = Math.min(
-      Math.abs(rect.top - anchorY),
-      Math.abs(rect.bottom - anchorY)
-    );
-    if (distance < closestDistance) {
-      closestArticle = article;
-      closestDistance = distance;
+    const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
+    if (distance < nearestDistance) {
+      nearestPost = post;
+      nearestDistance = distance;
     }
   }
 
-  return closestArticle;
+  return nearestPost;
 };
 
-const startReader = async (ctx: ContentScriptContext): Promise<void> => {
-  const initialSettings = await readerSettings.getValue();
+const focusScrollBehavior = (): ScrollBehavior =>
+  window.matchMedia(REDUCED_MOTION_QUERY).matches ? "auto" : "smooth";
+
+const scrollPostIntoView = (post: HTMLElement): void => {
+  const rect = post.getBoundingClientRect();
+  const isTallPost = rect.height > window.innerHeight - 96;
+  post.scrollIntoView({
+    behavior: focusScrollBehavior(),
+    block: isTallPost ? "start" : "center",
+    inline: "nearest",
+  });
+};
+
+const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
+  const initialSettings = await focusSettings.getValue();
   if (ctx.isInvalid) {
     return;
   }
 
-  const elements = createReaderElements();
-  const state: ReaderState = {
-    activePostUrl: null,
-    activeSource: null,
-    embedStatus: "idle",
-    embedTheme: null,
-    isPinned: false,
-    lastPointer: null,
-    loadedPostUrl: null,
+  const elements = createFocusElements();
+  const state: FocusState = {
+    activePost: null,
+    isActive: false,
+    returnUrl: null,
     settings: initialSettings,
   };
 
-  let embedTimer = 0;
-  let layoutFrame = 0;
-  let positionFrame = 0;
-  let selectionFrame = 0;
+  let geometryFrame = 0;
+  let hideTimer = 0;
+  let positionTrackingEndTime = 0;
+  let positionTrackingFrame = 0;
+  let selectionTimer = 0;
 
-  const updateModeLabels = (): void => {
-    elements.host.dataset.embedStatus = state.embedStatus;
-    elements.host.dataset.pinned = String(state.isPinned);
-    elements.pinButton.setAttribute("aria-pressed", String(state.isPinned));
-    elements.pinButton.textContent = state.isPinned ? "Pinned" : "Pin";
+  const activePostObserver = new ResizeObserver(() => {
+    if (!geometryFrame) {
+      geometryFrame = ctx.requestAnimationFrame(updateGeometry);
+    }
+  });
 
-    if (state.embedStatus === "error") {
-      elements.status.textContent = "Embed unavailable";
-      elements.footerMode.textContent = "View replies on X";
-      return;
-    }
-    if (state.embedStatus === "loading") {
-      elements.status.textContent = "Loading X embed…";
-      elements.footerMode.textContent = "Official X embed";
-      return;
-    }
-    if (state.isPinned) {
-      elements.status.textContent = "Pinned post";
-      elements.footerMode.textContent = "Selection locked";
-      return;
-    }
-
-    elements.status.textContent = state.settings.followCursor
-      ? "Following cursor"
-      : "Following scroll";
-    elements.footerMode.textContent = "Official X embed";
-  };
-
-  const renderSelection = (): void => {
-    const hasSelection = Boolean(state.activePostUrl);
-    const embedIsCurrent =
-      hasSelection &&
-      state.loadedPostUrl === state.activePostUrl &&
-      state.embedStatus === "ready";
-
-    elements.openLink.hidden = !hasSelection;
-    elements.pinButton.disabled = !hasSelection;
-    elements.embedFrame.hidden = !(
-      hasSelection &&
-      state.loadedPostUrl === state.activePostUrl &&
-      state.embedStatus !== "error"
-    );
-    elements.placeholder.hidden = Boolean(embedIsCurrent);
-
-    if (state.activePostUrl) {
-      elements.openLink.href = state.activePostUrl;
-    }
-
-    if (!hasSelection) {
-      elements.placeholderTitle.textContent = "Choose a post";
-      elements.placeholderCopy.textContent =
-        "Pause over a post to load its official X embed here.";
-      updateModeLabels();
-      return;
-    }
-    if (state.embedStatus === "error") {
-      elements.placeholderTitle.textContent = "This post cannot be embedded";
-      elements.placeholderCopy.textContent =
-        "Protected or restricted posts may only be available directly on X.";
-      updateModeLabels();
-      return;
-    }
-
-    elements.placeholderTitle.textContent = "Loading post…";
-    elements.placeholderCopy.textContent =
-      "Fetching the official X embed with media and post actions.";
-    updateModeLabels();
-  };
-
-  const loadActiveEmbed = (): void => {
-    embedTimer = 0;
-    const postUrl = state.activePostUrl;
-    if (!postUrl) {
-      return;
-    }
-
-    const theme = getPageTheme();
-    const embedUrl = getEmbedUrl(postUrl, theme);
-    if (!embedUrl) {
-      state.embedStatus = "error";
-      renderSelection();
-      return;
-    }
-    if (
-      state.loadedPostUrl === postUrl &&
-      state.embedTheme === theme &&
-      state.embedStatus !== "error"
-    ) {
-      return;
-    }
-
-    state.embedStatus = "loading";
-    state.embedTheme = theme;
-    state.loadedPostUrl = postUrl;
-    elements.embedFrame.src = embedUrl;
-    renderSelection();
-  };
-
-  const scheduleEmbedLoad = (): void => {
-    if (!state.activePostUrl) {
-      return;
-    }
-    if (embedTimer) {
-      window.clearTimeout(embedTimer);
-    }
-    state.embedStatus = "loading";
-    renderSelection();
-    embedTimer = ctx.setTimeout(loadActiveEmbed, EMBED_LOAD_DELAY);
-  };
-
-  const setPinned = (isPinned: boolean): void => {
-    if (isPinned && !state.activeSource) {
-      return;
-    }
-    state.isPinned = isPinned;
-    if (state.activeSource) {
-      state.activeSource.setAttribute(
-        ACTIVE_ATTRIBUTE,
-        isPinned ? "pinned" : "true"
-      );
-    }
-    updateModeLabels();
-  };
-
-  const selectArticle = (article: HTMLElement | null, force = false): void => {
-    if (!(article?.isConnected && !state.isPinned)) {
-      return;
-    }
-    const postUrl = getPostUrl(article);
-    if (!postUrl) {
-      return;
-    }
-    if (!force && state.activePostUrl === postUrl) {
-      if (state.activeSource !== article) {
-        state.activeSource?.removeAttribute(ACTIVE_ATTRIBUTE);
-        state.activeSource = article;
-        article.setAttribute(ACTIVE_ATTRIBUTE, "true");
-      }
-      return;
-    }
-
-    state.activeSource?.removeAttribute(ACTIVE_ATTRIBUTE);
-    state.activeSource = article;
-    state.activePostUrl = postUrl;
-    article.setAttribute(ACTIVE_ATTRIBUTE, "true");
-    scheduleEmbedLoad();
-  };
-
-  const selectFromViewport = (): void => {
-    if (state.isPinned || !state.settings.enabled) {
-      return;
-    }
-    const primaryColumn = document.querySelector(PRIMARY_COLUMN_SELECTOR);
-    if (!primaryColumn) {
-      return;
-    }
-
-    if (state.settings.followCursor && state.lastPointer) {
-      const { x, y } = state.lastPointer;
-      const primaryRect = primaryColumn.getBoundingClientRect();
-      const pointerIsOverFeed =
-        x >= primaryRect.left &&
-        x <= primaryRect.right &&
-        y >= 0 &&
-        y <= window.innerHeight;
-      if (pointerIsOverFeed) {
-        const pointedArticle = getArticleFromTarget(
-          document.elementFromPoint(x, y)
-        );
-        if (pointedArticle) {
-          selectArticle(pointedArticle);
-          return;
-        }
-      }
-    }
-
-    const anchorY = getAnchorY(state.lastPointer, window.innerHeight);
-    selectArticle(findArticleAtAnchor(primaryColumn, anchorY));
-  };
-
-  const scheduleViewportSelection = (): void => {
-    if (selectionFrame) {
-      return;
-    }
-    selectionFrame = ctx.requestAnimationFrame(() => {
-      selectionFrame = 0;
-      selectFromViewport();
+  function announce(message: string): void {
+    elements.liveRegion.textContent = "";
+    ctx.requestAnimationFrame(() => {
+      elements.liveRegion.textContent = message;
     });
-  };
+  }
 
-  const updateReaderPosition = (): void => {
-    const primaryColumn = document.querySelector<HTMLElement>(
-      PRIMARY_COLUMN_SELECTOR
+  function updateLikeLabel(): void {
+    const isLiked = Boolean(
+      state.activePost?.querySelector('[data-testid="unlike"]')
     );
-    if (!primaryColumn || elements.host.hidden) {
+    const label = isLiked ? "Unlike" : "Like";
+    if (elements.likeLabel.textContent !== label) {
+      elements.likeLabel.textContent = label;
+    }
+  }
+
+  function updateGeometry(): void {
+    geometryFrame = 0;
+    const post = state.activePost;
+    if (!(state.isActive && post?.isConnected)) {
+      elements.frame.hidden = true;
+      elements.hole.setAttribute("height", "0");
+      elements.hole.setAttribute("width", "0");
       return;
     }
-    const { right } = primaryColumn.getBoundingClientRect();
-    elements.host.style.left = `${Math.round(right)}px`;
+
+    const rect = post.getBoundingClientRect();
+    const left = Math.max(0, rect.left - FOCUS_OUTSET);
+    const top = Math.max(0, rect.top - FOCUS_OUTSET);
+    const right = Math.min(window.innerWidth, rect.right + FOCUS_OUTSET);
+    const bottom = Math.min(window.innerHeight, rect.bottom + FOCUS_OUTSET);
+    const width = Math.max(0, right - left);
+    const height = Math.max(0, bottom - top);
+    const isVisible = width > 0 && height > 0;
+
+    elements.frame.hidden = !isVisible;
+    elements.hole.setAttribute("height", String(height));
+    elements.hole.setAttribute(
+      "rx",
+      String(Math.min(FOCUS_RADIUS, height / 2))
+    );
+    elements.hole.setAttribute("width", String(width));
+    elements.hole.setAttribute("x", String(left));
+    elements.hole.setAttribute("y", String(top));
+    elements.frame.style.setProperty("--better-x-focus-height", `${height}px`);
+    elements.frame.style.setProperty("--better-x-focus-left", `${left}px`);
+    elements.frame.style.setProperty("--better-x-focus-top", `${top}px`);
+    elements.frame.style.setProperty("--better-x-focus-width", `${width}px`);
+  }
+
+  const scheduleGeometry = (): void => {
+    if (geometryFrame) {
+      return;
+    }
+    geometryFrame = ctx.requestAnimationFrame(updateGeometry);
+  };
+
+  const trackPosition = (): void => {
+    positionTrackingEndTime =
+      window.performance.now() + POSITION_TRACKING_DURATION_MS;
+    if (positionTrackingFrame) {
+      return;
+    }
+    const trackFrame = (): void => {
+      positionTrackingFrame = 0;
+      scheduleGeometry();
+      if (
+        state.isActive &&
+        window.performance.now() < positionTrackingEndTime
+      ) {
+        positionTrackingFrame = ctx.requestAnimationFrame(trackFrame);
+      }
+    };
+    trackFrame();
+  };
+
+  const animateSelection = (): void => {
+    if (window.matchMedia(REDUCED_MOTION_QUERY).matches) {
+      return;
+    }
+    for (const animation of elements.frame.getAnimations()) {
+      animation.cancel();
+    }
+    elements.frame.animate(
+      [
+        { opacity: 0.45, scale: "0.985" },
+        { opacity: 1, scale: "1" },
+      ],
+      {
+        duration: OPEN_DURATION_MS,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      }
+    );
+  };
+
+  const selectPost = (post: HTMLElement, shouldScroll = true): void => {
+    if (!post.isConnected) {
+      return;
+    }
+    if (state.activePost !== post) {
+      if (state.activePost) {
+        activePostObserver.unobserve(state.activePost);
+        state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+      }
+      state.activePost = post;
+      post.setAttribute(ACTIVE_ATTRIBUTE, "true");
+      activePostObserver.observe(post);
+      animateSelection();
+    }
+
+    updateLikeLabel();
+    scheduleGeometry();
+    if (shouldScroll) {
+      scrollPostIntoView(post);
+      trackPosition();
+    }
+  };
+
+  const selectNearestPost = (shouldScroll = false): boolean => {
+    const post = findNearestVisiblePost();
+    if (!post) {
+      return false;
+    }
+    selectPost(post, shouldScroll);
+    return true;
+  };
+
+  const showFocusSurface = (): void => {
+    if (hideTimer) {
+      window.clearTimeout(hideTimer);
+      hideTimer = 0;
+    }
     elements.host.dataset.theme = getPageTheme();
-  };
-
-  const scheduleReaderPosition = (): void => {
-    if (positionFrame) {
-      return;
-    }
-    positionFrame = ctx.requestAnimationFrame(() => {
-      positionFrame = 0;
-      updateReaderPosition();
+    elements.host.hidden = false;
+    ctx.requestAnimationFrame(() => {
+      if (state.isActive) {
+        elements.host.dataset.open = "true";
+      }
     });
   };
 
-  const clearSelection = (): void => {
-    if (embedTimer) {
-      window.clearTimeout(embedTimer);
-      embedTimer = 0;
-    }
-    state.activeSource?.removeAttribute(ACTIVE_ATTRIBUTE);
-    state.activeSource = null;
-    state.activePostUrl = null;
-    state.embedStatus = "idle";
-    state.isPinned = false;
-    renderSelection();
-  };
-
-  const applyLayout = (): void => {
-    const primaryColumn = document.querySelector(PRIMARY_COLUMN_SELECTOR);
-    const shouldShowReader =
-      state.settings.enabled &&
-      isSupportedRoute() &&
-      Boolean(primaryColumn) &&
-      window.innerWidth >= MINIMUM_SPLIT_WIDTH;
-
-    document.documentElement.toggleAttribute(
-      "data-better-x-layout",
-      shouldShowReader
-    );
-    if (shouldShowReader) {
-      document.documentElement.dataset.betterXLayout = "split";
-    }
-
-    const shouldCompact = shouldShowReader && state.settings.compactFeed;
-    document.documentElement.toggleAttribute(
-      "data-better-x-density",
-      shouldCompact
-    );
-    if (shouldCompact) {
-      document.documentElement.dataset.betterXDensity = "compact";
-    }
-
-    elements.host.hidden = !shouldShowReader;
-    updateModeLabels();
-
-    if (shouldShowReader) {
-      scheduleReaderPosition();
-      scheduleViewportSelection();
+  const enterFocusMode = (): void => {
+    if (!(state.settings.enabled && selectNearestPost())) {
       return;
     }
-    clearSelection();
+    state.isActive = true;
+    state.returnUrl = null;
+    document.documentElement.setAttribute(FOCUS_ATTRIBUTE, "true");
+    showFocusSurface();
+    scheduleGeometry();
+    announce("Focus Mode on");
   };
 
-  const scheduleLayout = (): void => {
-    if (layoutFrame) {
+  const exitFocusMode = (): void => {
+    if (!state.isActive) {
       return;
     }
-    layoutFrame = ctx.requestAnimationFrame(() => {
-      layoutFrame = 0;
-      applyLayout();
+    state.isActive = false;
+    state.returnUrl = null;
+    document.documentElement.removeAttribute(FOCUS_ATTRIBUTE);
+    delete elements.host.dataset.open;
+    if (state.activePost) {
+      activePostObserver.unobserve(state.activePost);
+      state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+      state.activePost = null;
+    }
+    hideTimer = ctx.setTimeout(() => {
+      if (!state.isActive) {
+        elements.host.hidden = true;
+      }
+      hideTimer = 0;
+    }, CLOSE_DURATION_MS);
+  };
+
+  const scheduleBoundarySelection = (direction: NavigationDirection): void => {
+    if (selectionTimer) {
+      window.clearTimeout(selectionTimer);
+    }
+    window.scrollBy({
+      behavior: focusScrollBehavior(),
+      top: direction * window.innerHeight * 0.72,
     });
+    trackPosition();
+    selectionTimer = ctx.setTimeout(() => {
+      selectionTimer = 0;
+      const posts = getPosts();
+      const currentIndex = state.activePost
+        ? posts.indexOf(state.activePost)
+        : -1;
+      const nextPost =
+        currentIndex >= 0 ? posts[currentIndex + direction] : null;
+      if (nextPost) {
+        selectPost(nextPost);
+        return;
+      }
+      selectNearestPost();
+    }, POSITION_TRACKING_DURATION_MS);
   };
 
-  const handlePointerMove = (event: PointerEvent): void => {
-    state.lastPointer = { x: event.clientX, y: event.clientY };
-    if (!state.settings.followCursor || state.isPinned) {
+  const moveSelection = (direction: NavigationDirection): void => {
+    const posts = getPosts();
+    if (posts.length === 0) {
       return;
     }
-    selectArticle(getArticleFromTarget(event.target));
+    const currentIndex = state.activePost
+      ? posts.indexOf(state.activePost)
+      : -1;
+    if (currentIndex < 0) {
+      selectNearestPost(true);
+      return;
+    }
+    const nextPost = posts[currentIndex + direction];
+    if (!nextPost) {
+      scheduleBoundarySelection(direction);
+      return;
+    }
+    selectPost(nextPost);
+    announce(direction > 0 ? "Next post" : "Previous post");
   };
 
-  const handleFocusIn = (event: FocusEvent): void => {
-    selectArticle(getArticleFromTarget(event.target));
+  const likePost = (): void => {
+    const button =
+      state.activePost?.querySelector<HTMLButtonElement>(LIKE_SELECTOR);
+    if (!button) {
+      announce("Like is unavailable for this post");
+      return;
+    }
+    const wasLiked = button.dataset.testid === "unlike";
+    button.click();
+    announce(wasLiked ? "Post unliked" : "Post liked");
+    ctx.setTimeout(updateLikeLabel, OPEN_DURATION_MS);
+  };
+
+  const replyToPost = (): void => {
+    const button =
+      state.activePost?.querySelector<HTMLButtonElement>(REPLY_SELECTOR);
+    if (!button) {
+      announce("Reply is unavailable for this post");
+      return;
+    }
+    button.click();
+    announce("Reply composer opened");
+  };
+
+  const openPost = (): void => {
+    if (!state.activePost) {
+      return;
+    }
+    const link = getPostLink(state.activePost);
+    if (!link) {
+      announce("This conversation cannot be opened");
+      return;
+    }
+    state.returnUrl = window.location.href;
+    link.click();
+    announce("Conversation opened");
+  };
+
+  const returnToFeed = (): void => {
+    if (!state.returnUrl) {
+      return;
+    }
+    state.returnUrl = null;
+    window.history.back();
+  };
+
+  const consumeKeyEvent = (event: KeyboardEvent): void => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
+  const handleNavigationKey = (event: KeyboardEvent): boolean => {
+    if (event.key === "ArrowDown") {
+      moveSelection(1);
+      return true;
+    }
+    if (event.key === "ArrowUp") {
+      moveSelection(-1);
+      return true;
+    }
+    if (event.key === "ArrowRight" || event.key === "Enter") {
+      openPost();
+      return true;
+    }
+    if (event.key === "ArrowLeft" && state.returnUrl) {
+      returnToFeed();
+      return true;
+    }
+    return false;
+  };
+
+  const handlePostActionKey = (event: KeyboardEvent): boolean => {
+    if (event.repeat) {
+      return false;
+    }
+    if (event.key.toLowerCase() === "l") {
+      likePost();
+      return true;
+    }
+    if (event.key.toLowerCase() === "r") {
+      replyToPost();
+      return true;
+    }
+    return false;
   };
 
   const handleKeyDown = (event: KeyboardEvent): void => {
     if (isEditableTarget(event.target)) {
       return;
     }
-    if (event.key === "Escape" && state.isPinned) {
-      event.preventDefault();
-      setPinned(false);
-      scheduleViewportSelection();
+    if (isFocusShortcut(event)) {
+      if (!state.settings.enabled) {
+        return;
+      }
+      consumeKeyEvent(event);
+      if (state.isActive) {
+        exitFocusMode();
+      } else {
+        enterFocusMode();
+      }
       return;
     }
-    if (event.key.toLowerCase() === "p" && state.activeSource) {
-      event.preventDefault();
-      setPinned(!state.isPinned);
+    if (!state.isActive) {
+      return;
+    }
+    if (event.key === "Escape") {
+      consumeKeyEvent(event);
+      exitFocusMode();
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+    if (handleNavigationKey(event)) {
+      consumeKeyEvent(event);
+      return;
+    }
+    if (handlePostActionKey(event)) {
+      consumeKeyEvent(event);
     }
   };
 
-  const handleEmbedLoad = (): void => {
-    if (state.activePostUrl && state.loadedPostUrl === state.activePostUrl) {
-      state.embedStatus = "ready";
-      renderSelection();
-    }
-  };
-
-  const handleEmbedError = (): void => {
-    if (state.activePostUrl && state.loadedPostUrl === state.activePostUrl) {
-      state.embedStatus = "error";
-      renderSelection();
-    }
-  };
-
-  const disableReader = async (): Promise<void> => {
-    try {
-      await readerSettings.setValue({
-        ...state.settings,
-        enabled: false,
-      });
-    } catch {
-      elements.status.textContent = "Could not save";
-    }
-  };
-
-  ctx.addEventListener(document, "pointermove", handlePointerMove, {
+  ctx.addEventListener(window, "keydown", handleKeyDown, { capture: true });
+  ctx.addEventListener(window, "resize", scheduleGeometry, { passive: true });
+  ctx.addEventListener(window, "scroll", scheduleGeometry, {
+    capture: true,
     passive: true,
   });
-  ctx.addEventListener(document, "focusin", handleFocusIn);
-  ctx.addEventListener(document, "keydown", handleKeyDown);
-  ctx.addEventListener(window, "scroll", scheduleViewportSelection, {
-    passive: true,
-  });
-  ctx.addEventListener(window, "resize", scheduleLayout, { passive: true });
   ctx.addEventListener(window, "wxt:locationchange", () => {
-    setPinned(false);
-    scheduleLayout();
-  });
-  ctx.addEventListener(elements.embedFrame, "load", handleEmbedLoad);
-  ctx.addEventListener(elements.embedFrame, "error", handleEmbedError);
-  ctx.addEventListener(elements.pinButton, "click", () => {
-    setPinned(!state.isPinned);
-  });
-  ctx.addEventListener(elements.closeButton, "click", async () => {
-    await disableReader();
+    if (!state.isActive) {
+      return;
+    }
+    if (state.activePost && !state.activePost.isConnected) {
+      activePostObserver.unobserve(state.activePost);
+      state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+      state.activePost = null;
+    }
+    scheduleGeometry();
   });
 
-  const observer = new MutationObserver(() => {
-    scheduleLayout();
-    scheduleViewportSelection();
+  const pageObserver = new MutationObserver(() => {
+    if (!state.isActive) {
+      return;
+    }
+    if (!state.activePost?.isConnected) {
+      if (state.activePost) {
+        activePostObserver.unobserve(state.activePost);
+        state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
+        state.activePost = null;
+      }
+      selectNearestPost();
+      return;
+    }
+    updateLikeLabel();
+    scheduleGeometry();
   });
-  observer.observe(document.body, {
+  pageObserver.observe(document.body, {
     childList: true,
     subtree: true,
   });
 
-  const unwatchSettings = readerSettings.watch((settings) => {
+  const unwatchSettings = focusSettings.watch((settings) => {
     state.settings = settings;
     if (!settings.enabled) {
-      setPinned(false);
+      exitFocusMode();
     }
-    scheduleLayout();
   });
 
   ctx.onInvalidated(() => {
-    observer.disconnect();
+    activePostObserver.disconnect();
+    pageObserver.disconnect();
     unwatchSettings();
-    state.activeSource?.removeAttribute(ACTIVE_ATTRIBUTE);
+    if (geometryFrame) {
+      window.cancelAnimationFrame(geometryFrame);
+    }
+    if (hideTimer) {
+      window.clearTimeout(hideTimer);
+    }
+    if (positionTrackingFrame) {
+      window.cancelAnimationFrame(positionTrackingFrame);
+    }
+    if (selectionTimer) {
+      window.clearTimeout(selectionTimer);
+    }
+    state.activePost?.removeAttribute(ACTIVE_ATTRIBUTE);
+    document.documentElement.removeAttribute(FOCUS_ATTRIBUTE);
     elements.host.remove();
-    document.documentElement.removeAttribute("data-better-x-density");
-    document.documentElement.removeAttribute("data-better-x-layout");
   });
-
-  applyLayout();
 };
 
 export default defineContentScript({
-  main: startReader,
+  main: startFocusMode,
   matches: ["*://x.com/*", "*://*.x.com/*"],
   runAt: "document_idle",
 });

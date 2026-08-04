@@ -5,77 +5,44 @@ import {
   useState,
 } from "react";
 
-import {
-  DEFAULT_READER_SETTINGS,
-  type ReaderSettings,
-  readerSettings,
-} from "../../lib/settings";
+import { DEFAULT_FOCUS_SETTINGS, focusSettings } from "../../lib/settings";
 
 import "./popup.css";
 
-interface SettingToggleProps {
-  checked: boolean;
-  description: string;
-  disabled?: boolean;
-  label: string;
-  name: keyof ReaderSettings;
-  onChange: ChangeEventHandler<HTMLInputElement>;
-}
-
-const SettingToggle = ({
-  checked,
-  description,
-  disabled = false,
-  label,
-  name,
-  onChange,
-}: SettingToggleProps) => (
-  <label className="setting">
-    <span className="setting__copy">
-      <strong>{label}</strong>
-      <span>{description}</span>
-    </span>
-    <span className="switch">
-      <input
-        checked={checked}
-        disabled={disabled}
-        name={name}
-        onChange={onChange}
-        type="checkbox"
-      />
-      <span aria-hidden="true" className="switch__track" />
-    </span>
-  </label>
-);
+const SHORTCUTS = [
+  { keys: ["⇧", "F"], label: "Focus" },
+  { keys: ["↑", "↓"], label: "Navigate" },
+  { keys: ["L"], label: "Like" },
+  { keys: ["R"], label: "Reply" },
+  { keys: ["↵"], label: "Open" },
+] as const;
 
 function Popup() {
-  const [settings, setSettings] = useState<ReaderSettings>(
-    DEFAULT_READER_SETTINGS
-  );
+  const [enabled, setEnabled] = useState(DEFAULT_FOCUS_SETTINGS.enabled);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadSettings = async () => {
+    const loadSettings = async (): Promise<void> => {
       try {
-        const savedSettings = await readerSettings.getValue();
+        const settings = await focusSettings.getValue();
         if (isMounted) {
-          setSettings(savedSettings);
+          setEnabled(settings.enabled);
           setIsReady(true);
         }
       } catch {
         if (isMounted) {
-          setError("Settings could not be loaded.");
+          setError("Focus Mode settings could not be loaded.");
         }
       }
     };
 
     loadSettings();
-    const unwatch = readerSettings.watch((updatedSettings) => {
+    const unwatch = focusSettings.watch((settings) => {
       if (isMounted) {
-        setSettings(updatedSettings);
+        setEnabled(settings.enabled);
       }
     });
 
@@ -85,31 +52,21 @@ function Popup() {
     };
   }, []);
 
-  const handleSettingChange = useCallback<ChangeEventHandler<HTMLInputElement>>(
+  const handleEnabledChange = useCallback<ChangeEventHandler<HTMLInputElement>>(
     async (event) => {
-      const key = event.currentTarget.name;
-      if (
-        key !== "compactFeed" &&
-        key !== "enabled" &&
-        key !== "followCursor"
-      ) {
-        return;
-      }
-
-      const nextSettings = {
-        ...settings,
-        [key]: event.currentTarget.checked,
-      };
-      setSettings(nextSettings);
+      const previousEnabled = enabled;
+      const nextEnabled = event.currentTarget.checked;
+      setEnabled(nextEnabled);
       setError(null);
+
       try {
-        await readerSettings.setValue(nextSettings);
+        await focusSettings.setValue({ enabled: nextEnabled });
       } catch {
-        setSettings(settings);
+        setEnabled(previousEnabled);
         setError("That change could not be saved.");
       }
     },
-    [settings]
+    [enabled]
   );
 
   return (
@@ -120,53 +77,57 @@ function Popup() {
         </span>
         <span className="popup__heading">
           <strong>Better X</strong>
-          <span>Reader layout</span>
+          <span>Keyboard focus for X</span>
         </span>
-        <span
-          className={settings.enabled ? "status status--enabled" : "status"}
-        >
-          {settings.enabled ? "On" : "Off"}
+        <span className={enabled ? "status status--enabled" : "status"}>
+          {enabled ? "Ready" : "Off"}
         </span>
       </header>
 
-      <div aria-hidden="true" className="layout-preview">
-        <span className="layout-preview__nav" />
-        <span className="layout-preview__feed">
+      <div aria-hidden="true" className="focus-preview">
+        <span className="focus-preview__nav" />
+        <span className="focus-preview__page">
           <i />
-          <i />
+          <i className="focus-preview__post" />
           <i />
         </span>
-        <span className="layout-preview__reader">
+        <span className="focus-preview__shade" />
+        <span className="focus-preview__spotlight" />
+        <span className="focus-preview__toolbar">
+          <i />
+          <i />
           <i />
           <i />
         </span>
       </div>
 
-      <section aria-label="Reader settings" className="settings">
-        <SettingToggle
-          checked={settings.enabled}
-          description="Turn the feed into a conversation-first workspace."
-          disabled={!isReady}
-          label="Split view"
-          name="enabled"
-          onChange={handleSettingChange}
-        />
-        <SettingToggle
-          checked={settings.compactFeed}
-          description="Shorter cards make the feed work like a list."
-          disabled={!(isReady && settings.enabled)}
-          label="Compact feed"
-          name="compactFeed"
-          onChange={handleSettingChange}
-        />
-        <SettingToggle
-          checked={settings.followCursor}
-          description="Preview the post under your pointer in the reader."
-          disabled={!(isReady && settings.enabled)}
-          label="Follow cursor"
-          name="followCursor"
-          onChange={handleSettingChange}
-        />
+      <label className="setting">
+        <span className="setting__copy">
+          <strong>Enable Focus Mode</strong>
+          <span>Press Shift + F on X to spotlight the nearest post.</span>
+        </span>
+        <span className="switch">
+          <input
+            checked={enabled}
+            disabled={!isReady}
+            onChange={handleEnabledChange}
+            type="checkbox"
+          />
+          <span aria-hidden="true" className="switch__track" />
+        </span>
+      </label>
+
+      <section aria-label="Focus Mode shortcuts" className="shortcuts">
+        {SHORTCUTS.map((shortcut) => (
+          <span className="shortcut" key={shortcut.label}>
+            <span className="shortcut__keys">
+              {shortcut.keys.map((key) => (
+                <kbd key={key}>{key}</kbd>
+              ))}
+            </span>
+            <span>{shortcut.label}</span>
+          </span>
+        ))}
       </section>
 
       <footer className="popup__footer">
@@ -175,9 +136,7 @@ function Popup() {
             {error}
           </span>
         ) : (
-          <span>
-            Hover a post, then press <kbd>P</kbd> to pin its preview.
-          </span>
+          <span>Press Escape at any time to return to the normal page.</span>
         )}
       </footer>
     </main>

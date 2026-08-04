@@ -1,6 +1,6 @@
 # Better X
 
-A focused desktop reader and browser extension for X.
+A focused desktop reader and keyboard-first browser extension for X.
 
 ## Features
 
@@ -9,7 +9,8 @@ A focused desktop reader and browser extension for X.
 - **Warm post switching** — a bounded Electron `WebContentsView` pool preloads
   nearby posts.
 - **Persistent session** — every X view shares one isolated Chromium profile.
-- **Browser extension** — the original WXT reader remains available.
+- **Browser Focus Mode** — spotlight one native post, move with the arrow keys,
+  and like, reply, or open conversations without leaving the keyboard.
 - **Shared design system** — the desktop shell uses the same subtle surfaces,
   tokens, typography, and macOS chrome as 1git.
 

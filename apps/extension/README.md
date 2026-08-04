@@ -1,26 +1,23 @@
-# Better X Reader
+# Better X Focus Mode
 
-A WXT extension that turns desktop X timelines into a mail-style split view.
+A WXT extension that turns the native X timeline into a quiet, keyboard-first
+reading experience.
 
 ## Interaction model
 
-- X's trends and follow rail is removed.
-- Navigation and the existing timeline shift left.
-- The post under the pointer loads in the right pane using X's official embed.
-- Media and the actions provided by the official embedded Post stay available.
-- Press `P` to pin the current Post and `Escape` to resume live selection.
-- Use **View replies** to open the complete native conversation on X.
+Press `Shift + F` on X to enter or leave Focus Mode. The post nearest the center
+of the viewport stays fully visible while the surrounding page is dimmed.
 
-Regular `x.com/.../status/...` pages block framing. Better X therefore uses the
-frameable embedded-Post renderer served by `platform.twitter.com`. It does not
-remove X security headers, inject remote scripts, or use inline `srcdoc` code.
+- `Arrow Up` and `Arrow Down` select the previous or next post.
+- `L` uses X's native Like or Unlike action.
+- `R` opens X's native reply composer.
+- `Enter` or `Arrow Right` opens the selected conversation.
+- `Arrow Left` returns after opening a conversation from Focus Mode.
+- `Escape` exits Focus Mode.
 
-Official embeds support public Posts and parent context, but they do not include
-the complete replies timeline. Protected or restricted Posts fall back to
-**View replies**.
-
-The popup can disable the split view, keep full-height feed cards, or make the
-embedded Post follow the scroll position instead of the cursor.
+Focus Mode operates on X's existing post elements and controls. It does not clone
+posts, load embeds, or create a second conversation view, so authenticated actions,
+media, and replies remain native to X.
 
 ## Development
 

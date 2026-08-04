@@ -1,20 +1,16 @@
 import { storage } from "wxt/utils/storage";
 
-export interface ReaderSettings {
-  compactFeed: boolean;
+export interface FocusSettings {
   enabled: boolean;
-  followCursor: boolean;
 }
 
-export const DEFAULT_READER_SETTINGS: ReaderSettings = {
-  compactFeed: true,
+export const DEFAULT_FOCUS_SETTINGS: FocusSettings = {
   enabled: true,
-  followCursor: true,
 };
 
-export const readerSettings = storage.defineItem<ReaderSettings>(
-  "local:reader-settings",
+export const focusSettings = storage.defineItem<FocusSettings>(
+  "local:focus-settings",
   {
-    fallback: DEFAULT_READER_SETTINGS,
+    fallback: DEFAULT_FOCUS_SETTINGS,
   }
 );
