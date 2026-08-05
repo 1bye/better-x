@@ -10,6 +10,9 @@ of the viewport stays fully visible while the surrounding page is dimmed.
 
 - `Arrow Up` and `Arrow Down` select the previous or next post.
 - `L` uses X's native Like or Unlike action.
+- Hold `Space` to temporarily reveal the surrounding timeline.
+- `B` uses X's native Bookmark or Remove Bookmark action.
+- `C` copies the selected post's canonical link.
 - `R` opens X's native reply composer.
 - `Enter` or `Arrow Right` opens the selected conversation.
 - `Arrow Left` returns after opening a conversation from Focus Mode.

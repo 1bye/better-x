@@ -6,7 +6,7 @@ export default defineConfig({
       "Spotlight X posts and control the timeline from your keyboard.",
     host_permissions: ["https://x.com/*", "https://*.x.com/*"],
     name: "Better X Focus Mode",
-    permissions: ["storage"],
+    permissions: ["clipboardWrite", "storage"],
   },
   modules: ["@wxt-dev/module-react"],
 });
