@@ -1,0 +1,295 @@
+@import "@better-x/ui/globals.css";
+@import "dockview-react/dist/styles/dockview.css";
+@source "../components/**/*.{ts,tsx}";
+
+:root {
+  --desktop-titlebar-controls-width: 5rem;
+  --workspace-surface-inset: 6px;
+  --workspace-surface-radius: 14px;
+  --workspace-tile-gap: 3px;
+  --workspace-tile-radius: 12px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+body {
+  overflow: hidden;
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.4;
+  color: var(--editor-ink);
+  user-select: none;
+  background: transparent;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea,
+[data-desktop-interactive] {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+[data-desktop-drag] {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-name="App"] {
+  background: transparent;
+}
+
+.workspace-surface {
+  margin: 0 var(--workspace-surface-inset) var(--workspace-surface-inset);
+  overflow: hidden;
+  background: var(--editor-sunken);
+  border-radius: var(--workspace-surface-radius);
+}
+
+.workspace-surface[data-mode="error"],
+.workspace-surface[data-mode="login"],
+.workspace-surface[data-mode="starting"] {
+  display: block;
+  background: var(--editor-surface);
+  border: 1px solid var(--editor-hairline-strong);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+}
+
+.startup-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 44px;
+  text-align: center;
+}
+
+.workspace-dock {
+  --dv-active-sash-color: rgb(0 0 0 / 0.16);
+  --dv-active-sash-transition-delay: 80ms;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--editor-faint);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--editor-surface);
+  --dv-activegroup-visiblepanel-tab-color: var(--editor-ink);
+  --dv-border-radius: var(--workspace-tile-radius);
+  --dv-drag-over-background-color: color-mix(
+    in oklab,
+    var(--brand) 10%,
+    transparent
+  );
+  --dv-drag-over-border: 1px solid
+    color-mix(in oklab, var(--brand) 30%, transparent);
+  --dv-floating-group-border: 1px solid var(--editor-hairline-strong);
+  --dv-group-view-background-color: var(--editor-surface);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--editor-faint);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--editor-surface);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--editor-muted);
+  --dv-spacing-padding: var(--workspace-tile-gap);
+  --dv-tab-border-radius: 7px;
+  --dv-tab-divider-color: transparent;
+  --dv-tab-font-size: 11px;
+  --dv-tab-margin: 3px 2px;
+  --dv-tabs-and-actions-container-background-color: var(--editor-sunken);
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tabs-and-actions-container-height: 32px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  background: var(--editor-sunken);
+}
+
+.workspace-dock > .dv-dockview {
+  width: 100%;
+  height: 100%;
+  background: var(--editor-sunken);
+}
+
+.workspace-dock .dv-view {
+  box-sizing: border-box;
+  padding: var(--workspace-tile-gap);
+}
+
+.workspace-dock .dv-groupview {
+  box-sizing: border-box;
+  background: var(--editor-surface);
+  border: 1px solid var(--editor-hairline-strong) !important;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.025),
+    inset 0 1px 0 rgb(255 255 255 / 0.7);
+}
+
+.workspace-dock .dv-groupview > .dv-tabs-and-actions-container {
+  color: var(--editor-muted);
+  background: var(--editor-sunken) !important;
+  border-bottom: 1px solid var(--editor-hairline);
+}
+
+.workspace-dock .dv-groupview > .dv-content-container {
+  background: var(--editor-surface);
+}
+
+.workspace-dock .dv-tab {
+  min-width: 0;
+  padding: 0 8px;
+  color: var(--editor-faint) !important;
+  background: transparent !important;
+}
+
+.workspace-dock .dv-tab.dv-active-tab {
+  color: var(--editor-ink) !important;
+  background: var(--editor-surface) !important;
+  box-shadow: 0 0 0 1px var(--editor-hairline);
+}
+
+.workspace-dock .dv-tab:focus::after,
+.workspace-dock .dv-tab:focus-within::after {
+  outline-color: color-mix(in oklab, var(--brand) 40%, transparent) !important;
+  border-radius: var(--dv-tab-border-radius);
+}
+
+.workspace-dock .dv-sash {
+  border-radius: 999px;
+}
+
+.workspace-dock .dv-drop-target-anchor,
+.workspace-dock .dv-drop-target-selection {
+  border-radius: calc(var(--workspace-tile-radius) - 2px);
+}
+
+.workspace-tile-tab {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+
+.workspace-tile-tab svg {
+  flex: 0 0 auto;
+  color: var(--editor-muted);
+}
+
+.native-surface {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--editor-surface);
+}
+
+.native-surface-placeholder,
+.workspace-watermark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 44px;
+  text-align: center;
+}
+
+.workspace-watermark {
+  gap: 10px;
+  font-size: 11px;
+  color: var(--editor-faint);
+}
+
+.workspace-watermark svg {
+  color: var(--editor-muted);
+}
+
+.workspace-dock[data-docking="true"] .dv-groupview {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.025),
+    0 0 0 1px color-mix(in oklab, var(--brand) 8%, transparent);
+}
+
+.native-surface-placeholder h1,
+.startup-placeholder h1 {
+  margin: 16px 0 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--editor-ink);
+  letter-spacing: -0.015em;
+}
+
+.native-surface-placeholder p,
+.startup-placeholder p {
+  max-width: 300px;
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--editor-faint);
+}
+
+.placeholder-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: var(--editor-muted);
+  background: var(--editor-sunken);
+  border: 1px solid var(--editor-hairline);
+  border-radius: 15px;
+}
+
+.loading-ring {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--editor-hairline-strong);
+  border-top-color: var(--editor-muted);
+  border-radius: 999px;
+  animation: loading-ring 700ms linear infinite;
+}
+
+.status-dot {
+  background: #00a865;
+}
+
+[data-name="WorkspaceStatus"][data-mode="error"] .status-dot {
+  background: #e5484d;
+}
+
+[data-name="WorkspaceStatus"][data-mode="login"] .status-dot,
+[data-name="WorkspaceStatus"][data-mode="starting"] .status-dot {
+  background: #e8a317;
+}
+
+@keyframes loading-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -30,12 +30,15 @@ act as maximums, automatically fitting unusually large posts to the viewport.
 ## Image editor
 
 Use the sparkle button beside X's media control to choose an image, or use the
-`Edit` badge on an attached image. The local editor treats images, text,
+`Edit` badge on an attached image. Attached media expands from its visible
+composer bounds into the editor and returns there on Cancel; reduced-motion
+preferences skip the spatial transition. The local editor treats images, text,
 rectangles, arrows, and blur regions as independent objects. Select an object
 directly on the canvas, then move, resize, or rotate it with the visible handles.
 A small contextual Liquid card exposes typography, appearance, image adjustments,
-opacity, arrangement, and solid or gradient canvas backgrounds. The canvas always
-fits itself to the available space; it has no navigation mode.
+opacity, arrangement, and solid or gradient canvas backgrounds. The canvas stays
+uniformly scaled inside a spacious adaptive viewport; it never crops or distorts
+the scene and has no navigation mode.
 
 Double-click an image or press `C` to enter non-destructive freeform crop mode.
 Drag to reposition its contents, resize the frame to change the crop, and scroll
@@ -50,6 +53,13 @@ to zoom inside it. Press `Enter` to keep the crop or `Escape` to restore it.
 - `Command + Enter` renders the scene back into X's native composer.
 - `Escape` cancels the current crop, clears the selection, then closes without
   changing the attachment.
+
+## Architecture
+
+WXT entrypoints only compose the extension. Focus Mode lives in
+`feature/focus-mode`, while the React editor, canvas model, renderer, and
+X upload bridge live in `feature/image-editor`. Each feature keeps its
+components, hooks, library code, and styles with the behavior that owns them.
 
 ## Development
 

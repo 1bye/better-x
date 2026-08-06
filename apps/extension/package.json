@@ -1,8 +1,8 @@
 {
-  "name": "extension",
-  "version": "0.0.0",
+  "name": "@better-x/extension",
+  "version": "0.0.1",
   "private": true,
-  "description": "manifest.json description",
+  "description": "Keyboard-first Focus Mode and image editing for X",
   "type": "module",
   "scripts": {
     "dev": "wxt --port 5555",

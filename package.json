@@ -16,10 +16,6 @@
     "staged": "vp staged",
     "fix": "ultracite fix"
   },
-  "dependencies": {
-    "dotenv": "^17.4.2",
-    "zod": "^4.4.3"
-  },
   "devDependencies": {
     "@better-x/config": "workspace:*",
     "@biomejs/biome": "2.5.2",

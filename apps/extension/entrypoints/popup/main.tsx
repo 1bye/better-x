@@ -1,7 +1,6 @@
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
-
-import Popup from "./popup.tsx";
+import { FocusModePopup } from "../../feature/focus-mode/components/focus-mode-popup";
 
 import "./style.css";
 
@@ -12,6 +11,6 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <StrictMode>
-    <Popup />
+    <FocusModePopup />
   </StrictMode>
 );

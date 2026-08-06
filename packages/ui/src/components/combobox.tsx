@@ -1,5 +1,5 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
-import { cn } from "@better-x/ui/lib/utils";
+import { cn } from "@better-x/ui/utils/class-names";
 
 type ComboboxRootProps<
   Value,

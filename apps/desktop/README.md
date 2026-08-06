@@ -22,6 +22,13 @@ Chromium stores the session in the app's user-data directory and restores it
 after a restart. Better X does not read credentials, export cookies, spoof a
 browser fingerprint, or automate account actions.
 
+## Architecture
+
+The workspace is owned by `src/feature/x-workspace`. Its `components`, `hooks`,
+and `lib` folders contain renderer UI, renderer lifecycle, and shared models;
+the `main` and `preload` folders contain the Electron-specific edges. Files in
+`src/main`, `src/preload`, and `src/renderer` are composition entrypoints only.
+
 ## Development
 
 ```sh

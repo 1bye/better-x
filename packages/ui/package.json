@@ -5,14 +5,15 @@
   "type": "module",
   "exports": {
     "./globals.css": "./src/styles/globals.css",
-    "./liquid.css": "./src/styles/liquid.css",
+    "./liquid.css": "./src/fixture/liquid-menu/liquid.css",
     "./components/*": "./src/components/*.tsx",
-    "./liquid-menu/components/*": "./src/liquid-menu/components/*.tsx",
-    "./liquid-menu/constants/*": "./src/liquid-menu/constants/*.ts",
-    "./liquid-menu/hooks/*": "./src/liquid-menu/hooks/*.ts",
-    "./liquid-menu/lib/*": "./src/liquid-menu/lib/*.ts",
+    "./fixture/liquid-menu/components/*": "./src/fixture/liquid-menu/components/*.tsx",
+    "./fixture/liquid-menu/constants/*": "./src/fixture/liquid-menu/constants/*.ts",
+    "./fixture/liquid-menu/hooks/*": "./src/fixture/liquid-menu/hooks/*.ts",
+    "./fixture/liquid-menu/lib/*": "./src/fixture/liquid-menu/lib/*.ts",
+    "./lib/surface-classes": "./src/lib/surface-classes.ts",
     "./lib/surface-context": "./src/lib/surface-context.tsx",
-    "./lib/*": "./src/lib/*.ts"
+    "./utils/class-names": "./src/utils/class-names.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit"
@@ -21,10 +22,10 @@
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/manrope": "^5.2.8",
+    "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-slot": "^1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.28.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tailwind-merge": "^3.6.0"

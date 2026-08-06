@@ -37,11 +37,19 @@ bun run --cwd apps/extension dev
 ```
 better-x/
 ├── apps/
-│   ├── desktop/   # Electron + React desktop shell
-│   └── extension/ # WXT browser extension
+│   ├── desktop/
+│   │   └── src/feature/x-workspace/ # Workspace UI, model, main, and preload
+│   └── extension/
+│       └── feature/
+│           ├── focus-mode/          # Native timeline focus workflow
+│           └── image-editor/        # React canvas editor and X bridge
 └── packages/
     ├── config/    # Shared TypeScript configuration
-    └── ui/        # Shared UI components and design tokens
+    └── ui/
+        └── src/
+            ├── components/          # Reusable UI primitives
+            ├── fixture/liquid-menu/ # Composed Liquid UI fixture
+            └── utils/               # Named cross-primitive utilities
 ```
 
 ## Available Scripts

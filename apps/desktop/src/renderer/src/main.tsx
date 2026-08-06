@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "@/app.js";
-import "./styles.css";
+import { DesktopShell } from "@/feature/x-workspace/components/desktop-shell.js";
+import "@/feature/x-workspace/styles/workspace.css";
 
 document.documentElement.classList.add("light");
 
@@ -12,6 +12,6 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <DesktopShell />
   </StrictMode>
 );

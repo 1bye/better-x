@@ -1,4 +1,4 @@
-import { cn } from "@better-x/ui/lib/utils";
+import { cn } from "@better-x/ui/utils/class-names";
 import type { ComponentProps } from "react";
 
 const Textarea = ({ className, ...props }: ComponentProps<"textarea">) => (

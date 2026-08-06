@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(directory, "..", "..");
-const rendererSource = path.resolve(directory, "src", "renderer", "src");
+const appSource = path.resolve(directory, "src");
 
 export default {
   main: {
@@ -20,7 +20,14 @@ export default {
         external: ["electron"],
         input: {
           shell: path.resolve(directory, "src", "preload", "shell.ts"),
-          "x-feed": path.resolve(directory, "src", "preload", "x-feed.ts"),
+          "x-feed": path.resolve(
+            directory,
+            "src",
+            "feature",
+            "x-workspace",
+            "preload",
+            "x-feed.ts"
+          ),
         },
         output: {
           entryFileNames: "[name].js",
@@ -36,7 +43,7 @@ export default {
     plugins: [tailwindcss(), react()],
     resolve: {
       alias: {
-        "@": rendererSource,
+        "@": appSource,
       },
     },
     server: {

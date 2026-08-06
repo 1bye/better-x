@@ -4,7 +4,7 @@ import {
   type DesktopApi,
   type DesktopShellState,
   isDesktopShellState,
-} from "../shared/desktop-api.js";
+} from "../feature/x-workspace/lib/desktop-api.js";
 
 const desktopApi: DesktopApi = {
   getState: async () => {

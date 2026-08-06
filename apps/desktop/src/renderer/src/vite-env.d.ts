@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { DesktopApi } from "../../shared/desktop-api.js";
+import type { DesktopApi } from "../../feature/x-workspace/lib/desktop-api.js";
 
 declare global {
   interface Window {

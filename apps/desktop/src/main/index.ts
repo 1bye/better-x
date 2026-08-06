@@ -11,12 +11,12 @@ import {
 import {
   DESKTOP_IPC_CHANNELS,
   type DesktopShellState,
-  INITIAL_DESKTOP_STATE,
+  INITIAL_SHELL_STATE,
   isDesktopCommand,
-} from "../shared/desktop-api.js";
-import { parseWorkspaceViewLayout } from "../shared/view-layout.js";
-import { parseXFeedSelection } from "../shared/x-post.js";
-import { XWorkspace } from "./x-workspace.js";
+} from "../feature/x-workspace/lib/desktop-api.js";
+import { parseWorkspaceViewLayout } from "../feature/x-workspace/lib/view-layout.js";
+import { parseXFeedSelection } from "../feature/x-workspace/lib/x-post.js";
+import { XWorkspace } from "../feature/x-workspace/main/x-workspace.js";
 
 const MAIN_WINDOW_WIDTH = 1400;
 const MAIN_WINDOW_HEIGHT = 900;
@@ -146,9 +146,9 @@ const createMainWindow = async (): Promise<BrowserWindow> => {
 const registerIpc = (): void => {
   ipcMain.handle(DESKTOP_IPC_CHANNELS.getState, (event) => {
     if (event.sender !== mainWindow?.webContents) {
-      return INITIAL_DESKTOP_STATE;
+      return INITIAL_SHELL_STATE;
     }
-    return workspace?.getState() ?? INITIAL_DESKTOP_STATE;
+    return workspace?.getState() ?? INITIAL_SHELL_STATE;
   });
   ipcMain.on(DESKTOP_IPC_CHANNELS.command, (event, payload: unknown) => {
     if (
