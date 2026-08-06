@@ -23,7 +23,9 @@ of the viewport stays fully visible while the surrounding page is dimmed.
 Focus Mode operates on X's existing post elements and controls. It does not clone
 posts, load embeds, or create a second conversation view, so authenticated actions,
 media, and replies remain native to X. The spotlight is suspended while the native
-reply composer is open and returns when the composer closes.
+reply composer is open and returns when the composer closes. The shortcut toolbar
+fades after a brief idle period and returns on the next key press. Selected scales
+act as maximums, automatically fitting unusually large posts to the viewport.
 
 ## Development
 

@@ -1,6 +1,6 @@
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { defineContentScript } from "wxt/utils/define-content-script";
-
+import { fitFocusScale } from "../lib/focus-scale";
 import {
   FOCUS_SCALES,
   type FocusScale,
@@ -36,10 +36,12 @@ const REPLY_COMPOSER_SELECTOR =
 const REPLY_DETECTION_TIMEOUT_MS = 1200;
 const REPLY_SELECTOR = '[data-testid="reply"]';
 const SCALE_ANIMATION_DURATION_MS = 360;
+const SCALE_FIT_EPSILON = 0.005;
 const SCALE_OVERSHOOT_MAX = 0.035;
 const SCALE_OVERSHOOT_RATIO = 0.18;
 const SCALED_CONTAINER_ATTRIBUTE = "data-better-x-scaled-container";
 const STATUS_PATH_PATTERN = /^\/[^/]+\/status\/\d+\/?$/;
+const TOOLBAR_IDLE_DELAY_MS = 2200;
 const TRANSPARENT_BACKGROUNDS = new Set([
   "rgba(0, 0, 0, 0)",
   "rgba(0,0,0,0)",
@@ -65,6 +67,7 @@ interface FocusElements {
 interface FocusState {
   activePost: HTMLElement | null;
   animationsEnabled: boolean;
+  effectivePostScale: number;
   hasObservedReplyComposer: boolean;
   isActive: boolean;
   isPeeking: boolean;
@@ -305,6 +308,47 @@ const getPostContainer = (post: HTMLElement): HTMLElement | null =>
   post.closest<HTMLElement>('[data-testid="cellInnerDiv"]') ??
   post.parentElement;
 
+const clearFocusFill = (container: HTMLElement): void => {
+  container.style.removeProperty("--better-x-focus-fill-background");
+  container.style.removeProperty("--better-x-focus-fill-height");
+  container.style.removeProperty("--better-x-focus-fill-left");
+  container.style.removeProperty("--better-x-focus-fill-radius");
+  container.style.removeProperty("--better-x-focus-fill-top");
+  container.style.removeProperty("--better-x-focus-fill-width");
+};
+
+const updateFocusFill = (post: HTMLElement, spotlight: SpotlightRect): void => {
+  const container = getPostContainer(post);
+  if (!container?.hasAttribute(SCALED_CONTAINER_ATTRIBUTE)) {
+    return;
+  }
+  const containerRect = container.getBoundingClientRect();
+  container.style.setProperty(
+    "--better-x-focus-fill-background",
+    getPostBackgroundColor(post)
+  );
+  container.style.setProperty(
+    "--better-x-focus-fill-height",
+    `${spotlight.height}px`
+  );
+  container.style.setProperty(
+    "--better-x-focus-fill-left",
+    `${spotlight.left - containerRect.left}px`
+  );
+  container.style.setProperty(
+    "--better-x-focus-fill-radius",
+    `${Math.min(FOCUS_RADIUS, spotlight.height / 2)}px`
+  );
+  container.style.setProperty(
+    "--better-x-focus-fill-top",
+    `${spotlight.top - containerRect.top}px`
+  );
+  container.style.setProperty(
+    "--better-x-focus-fill-width",
+    `${spotlight.width}px`
+  );
+};
+
 const getPostLink = (post: HTMLElement): HTMLAnchorElement | null => {
   const links = post.querySelectorAll<HTMLAnchorElement>("a[href]");
   let fallbackLink: HTMLAnchorElement | null = null;
@@ -360,7 +404,8 @@ const findNearestVisiblePost = (): HTMLElement | null => {
   return nearestPost;
 };
 
-const formatFocusScale = (scale: FocusScale): string => `${scale}×`;
+const formatFocusScale = (scale: number): string =>
+  `${Number(scale.toFixed(2))}×`;
 
 const getNextFocusScale = (currentScale: FocusScale): FocusScale => {
   const currentIndex = FOCUS_SCALES.indexOf(currentScale);
@@ -389,6 +434,31 @@ const getSpotlightRect = (post: HTMLElement): SpotlightRect => {
   };
 };
 
+const getAdaptivePostScale = (
+  post: HTMLElement,
+  requestedScale: FocusScale
+): number => {
+  const rect = post.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const availableHalfWidth = Math.max(
+    0,
+    Math.min(centerX, window.innerWidth - centerX) - FOCUS_OUTSET
+  );
+  return fitFocusScale({
+    availableHeight: Math.max(
+      0,
+      window.innerHeight -
+        FOCUS_TOP_INSET -
+        FOCUS_BOTTOM_INSET -
+        FOCUS_OUTSET * 2
+    ),
+    availableWidth: availableHalfWidth * 2,
+    postHeight: post.offsetHeight,
+    postWidth: post.offsetWidth,
+    requestedScale,
+  });
+};
+
 const scrollPostIntoSpotlight = (
   post: HTMLElement,
   animationsEnabled: boolean
@@ -413,14 +483,16 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   }
 
   const elements = createFocusElements();
+  const initialScale = isFocusScale(savedScale) ? savedScale : FOCUS_SCALES[0];
   const state: FocusState = {
     activePost: null,
     animationsEnabled,
+    effectivePostScale: initialScale,
     hasObservedReplyComposer: false,
     isActive: false,
     isPeeking: false,
     isReplying: false,
-    postScale: isFocusScale(savedScale) ? savedScale : FOCUS_SCALES[0],
+    postScale: initialScale,
     returnUrl: null,
     settings: initialSettings,
   };
@@ -437,8 +509,10 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   let scaleTrackingEndTime = 0;
   let scaleTrackingFrame = 0;
   let selectionTimer = 0;
+  let toolbarIdleTimer = 0;
 
   const activePostObserver = new ResizeObserver(() => {
+    refreshAdaptiveScale();
     if (!geometryFrame) {
       geometryFrame = ctx.requestAnimationFrame(updateGeometry);
     }
@@ -449,6 +523,28 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     ctx.requestAnimationFrame(() => {
       elements.liveRegion.textContent = message;
     });
+  }
+
+  function clearToolbarIdleTimer(): void {
+    if (!toolbarIdleTimer) {
+      return;
+    }
+    window.clearTimeout(toolbarIdleTimer);
+    toolbarIdleTimer = 0;
+  }
+
+  function revealToolbar(): void {
+    clearToolbarIdleTimer();
+    delete elements.host.dataset.toolbarQuiet;
+    if (!(state.isActive && !state.isReplying)) {
+      return;
+    }
+    toolbarIdleTimer = ctx.setTimeout(() => {
+      if (state.isActive && !state.isReplying) {
+        elements.host.dataset.toolbarQuiet = "true";
+      }
+      toolbarIdleTimer = 0;
+    }, TOOLBAR_IDLE_DELAY_MS);
   }
 
   function hideFeedback(): void {
@@ -467,6 +563,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     }: FeedbackOptions = {}
   ): void {
     announce(message);
+    revealToolbar();
     hideFeedback();
     elements.feedbackIcon.textContent = symbol;
     elements.feedbackLabel.textContent = message;
@@ -543,29 +640,51 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     delete post.dataset.betterXScale;
     post.style.removeProperty("--better-x-post-scale");
     restorePostBackground(post);
-    getPostContainer(post)?.removeAttribute(SCALED_CONTAINER_ATTRIBUTE);
+    const container = getPostContainer(post);
+    if (container) {
+      container.removeAttribute(SCALED_CONTAINER_ATTRIBUTE);
+      clearFocusFill(container);
+    }
   }
 
   function updateScalePreference(preserveScaledSurface = false): void {
     elements.host.dataset.scale = String(state.postScale);
-    elements.scaleLabel.textContent = `Scale ${formatFocusScale(
-      state.postScale
-    )}`;
     const post = state.activePost;
     if (!post) {
+      state.effectivePostScale = state.postScale;
+      elements.host.dataset.effectiveScale = String(state.effectivePostScale);
+      elements.scaleLabel.textContent = `Scale ${formatFocusScale(
+        state.postScale
+      )}`;
       return;
     }
-    post.dataset.betterXScale = String(state.postScale);
-    post.style.setProperty("--better-x-post-scale", String(state.postScale));
+    state.effectivePostScale = getAdaptivePostScale(post, state.postScale);
+    const isFitted =
+      state.effectivePostScale < state.postScale - SCALE_FIT_EPSILON;
+    elements.host.dataset.effectiveScale = String(state.effectivePostScale);
+    elements.scaleLabel.textContent = isFitted
+      ? `Scale ${formatFocusScale(state.postScale)} · Fit ${formatFocusScale(
+          state.effectivePostScale
+        )}`
+      : `Scale ${formatFocusScale(state.postScale)}`;
+    post.dataset.betterXScale = String(state.effectivePostScale);
+    post.style.setProperty(
+      "--better-x-post-scale",
+      String(state.effectivePostScale)
+    );
     const container = getPostContainer(post);
     if (
-      (state.postScale === FOCUS_SCALES[0] && !preserveScaledSurface) ||
+      (state.effectivePostScale <= FOCUS_SCALES[0] + SCALE_FIT_EPSILON &&
+        !preserveScaledSurface) ||
       !state.isActive ||
       state.isPeeking ||
       state.isReplying
     ) {
       restorePostBackground(post);
-      container?.removeAttribute(SCALED_CONTAINER_ATTRIBUTE);
+      if (container) {
+        container.removeAttribute(SCALED_CONTAINER_ATTRIBUTE);
+        clearFocusFill(container);
+      }
       return;
     }
     if (!inlineBackgroundSnapshots.has(post)) {
@@ -579,7 +698,20 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       getPostBackgroundColor(post),
       "important"
     );
-    container?.setAttribute(SCALED_CONTAINER_ATTRIBUTE, "true");
+    if (container) {
+      container.setAttribute(SCALED_CONTAINER_ATTRIBUTE, "true");
+      updateFocusFill(post, getSpotlightRect(post));
+    }
+  }
+
+  function refreshAdaptiveScale(): void {
+    const previousScale = state.effectivePostScale;
+    updateScalePreference();
+    if (
+      Math.abs(state.effectivePostScale - previousScale) > SCALE_FIT_EPSILON
+    ) {
+      cancelPostScaleAnimation();
+    }
   }
 
   function updateGeometry(): void {
@@ -607,6 +739,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     elements.hole.setAttribute("width", String(width));
     elements.hole.setAttribute("x", String(left));
     elements.hole.setAttribute("y", String(top));
+    updateFocusFill(post, { height, left, top, width });
   }
 
   const scheduleGeometry = (): void => {
@@ -646,7 +779,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
 
   const getRenderedPostScale = (
     post: HTMLElement,
-    fallbackScale: FocusScale
+    fallbackScale: number
   ): number => {
     const renderedScale = Number.parseFloat(getComputedStyle(post).scale);
     return Number.isFinite(renderedScale) ? renderedScale : fallbackScale;
@@ -655,7 +788,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   const animatePostScale = (
     post: HTMLElement,
     fromScale: number,
-    toScale: FocusScale
+    toScale: number
   ): void => {
     cancelPostScaleAnimation();
     const direction = Math.sign(toScale - fromScale);
@@ -702,16 +835,23 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     }
     const post = state.activePost;
     const fromScale = post
-      ? getRenderedPostScale(post, previousScale)
-      : previousScale;
+      ? getRenderedPostScale(post, state.effectivePostScale)
+      : state.effectivePostScale;
+    const nextEffectiveScale = post
+      ? getAdaptivePostScale(post, nextScale)
+      : nextScale;
     const shouldAnimate =
       Boolean(post) &&
       isScaleMotionEnabled() &&
-      Math.abs(nextScale - fromScale) > Number.EPSILON;
+      Math.abs(nextEffectiveScale - fromScale) > SCALE_FIT_EPSILON;
     state.postScale = nextScale;
-    updateScalePreference(shouldAnimate && nextScale === FOCUS_SCALES[0]);
+    state.effectivePostScale = nextEffectiveScale;
+    updateScalePreference(
+      shouldAnimate &&
+        state.effectivePostScale <= FOCUS_SCALES[0] + SCALE_FIT_EPSILON
+    );
     if (post && shouldAnimate) {
-      animatePostScale(post, fromScale, nextScale);
+      animatePostScale(post, fromScale, state.effectivePostScale);
     } else {
       cancelPostScaleAnimation();
     }
@@ -760,6 +900,8 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   };
 
   const hideFocusSurface = (): void => {
+    clearToolbarIdleTimer();
+    delete elements.host.dataset.toolbarQuiet;
     delete elements.host.dataset.open;
     if (hideTimer) {
       window.clearTimeout(hideTimer);
@@ -783,6 +925,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     updateMotionPreference();
     updateScalePreference();
     elements.host.hidden = false;
+    revealToolbar();
     ctx.requestAnimationFrame(() => {
       if (state.isActive && !state.isReplying) {
         elements.host.dataset.open = "true";
@@ -819,8 +962,12 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     delete elements.host.dataset.peeking;
     updateScalePreference();
     const post = state.activePost;
-    if (post && state.postScale !== FOCUS_SCALES[0] && isScaleMotionEnabled()) {
-      animatePostScale(post, FOCUS_SCALES[0], state.postScale);
+    if (
+      post &&
+      state.effectivePostScale > FOCUS_SCALES[0] + SCALE_FIT_EPSILON &&
+      isScaleMotionEnabled()
+    ) {
+      animatePostScale(post, FOCUS_SCALES[0], state.effectivePostScale);
       trackScaleGeometry();
     }
     scheduleGeometry();
@@ -903,9 +1050,11 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     if (state.activePost) {
       state.activePost.removeAttribute(ACTIVE_ATTRIBUTE);
       restorePostBackground(state.activePost);
-      getPostContainer(state.activePost)?.removeAttribute(
-        SCALED_CONTAINER_ATTRIBUTE
-      );
+      const container = getPostContainer(state.activePost);
+      if (container) {
+        container.removeAttribute(SCALED_CONTAINER_ATTRIBUTE);
+        clearFocusFill(container);
+      }
     }
     hideFocusSurface();
     clearReplyDetectionTimer();
@@ -1045,7 +1194,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     const previousScale = state.postScale;
     const nextScale = getNextFocusScale(previousScale);
     applyPostScale(nextScale);
-    showFeedback(`Post scale ${formatFocusScale(nextScale)}`);
+    showFeedback(elements.scaleLabel.textContent);
 
     try {
       await focusScale.setValue(nextScale);
@@ -1175,6 +1324,12 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   const shouldIgnoreKeyDown = (event: KeyboardEvent): boolean =>
     state.isReplying || isEditableTarget(event.target);
 
+  const revealToolbarForKeyDown = (event: KeyboardEvent): void => {
+    if (!event.repeat) {
+      revealToolbar();
+    }
+  };
+
   const handleKeyDown = (event: KeyboardEvent): void => {
     if (shouldIgnoreKeyDown(event)) {
       return;
@@ -1190,6 +1345,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
       exitFocusMode();
       return;
     }
+    revealToolbarForKeyDown(event);
     if (handleContextPeekKeyDown(event)) {
       return;
     }
@@ -1234,7 +1390,15 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     },
     { passive: true }
   );
-  ctx.addEventListener(window, "resize", scheduleGeometry, { passive: true });
+  ctx.addEventListener(
+    window,
+    "resize",
+    () => {
+      refreshAdaptiveScale();
+      scheduleGeometry();
+    },
+    { passive: true }
+  );
   ctx.addEventListener(window, "scroll", scheduleGeometry, {
     capture: true,
     passive: true,
@@ -1312,6 +1476,7 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
     if (hideTimer) {
       window.clearTimeout(hideTimer);
     }
+    clearToolbarIdleTimer();
     hideFeedback();
     clearReplyDetectionTimer();
     if (scaleTrackingFrame) {
