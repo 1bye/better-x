@@ -9,6 +9,17 @@ import {
 } from "@better-x/ui/liquid-menu/components/liquid-menu";
 import { LiquidMenuAutoSize } from "@better-x/ui/liquid-menu/components/liquid-menu-auto-size";
 import { LiquidMenuStackProvider } from "@better-x/ui/liquid-menu/components/liquid-menu-stack-provider";
+import type { Icon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUpRight";
+import { CropIcon } from "@phosphor-icons/react/dist/csr/Crop";
+import { CursorIcon } from "@phosphor-icons/react/dist/csr/Cursor";
+import { DropHalfBottomIcon } from "@phosphor-icons/react/dist/csr/DropHalfBottom";
+import { RectangleIcon } from "@phosphor-icons/react/dist/csr/Rectangle";
+import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
+import { TextTIcon } from "@phosphor-icons/react/dist/csr/TextT";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import {
   createElement,
   type ReactElement,
@@ -31,13 +42,13 @@ import "../styles/image-editor.css";
 
 export const EDITOR_TOOL_DETAILS: Record<
   EditorTool,
-  { key: string; label: string; symbol: string }
+  { icon: Icon; key: string; label: string }
 > = {
-  arrow: { key: "A", label: "Arrow", symbol: "↗" },
-  blur: { key: "B", label: "Blur", symbol: "◌" },
-  rectangle: { key: "R", label: "Rectangle", symbol: "□" },
-  select: { key: "V", label: "Select", symbol: "↖" },
-  text: { key: "T", label: "Text", symbol: "T" },
+  arrow: { icon: ArrowUpRightIcon, key: "A", label: "Arrow" },
+  blur: { icon: DropHalfBottomIcon, key: "B", label: "Blur" },
+  rectangle: { icon: RectangleIcon, key: "R", label: "Rectangle" },
+  select: { icon: CursorIcon, key: "V", label: "Select" },
+  text: { icon: TextTIcon, key: "T", label: "Text" },
 };
 
 const INSPECTOR_ANCHOR_GEOMETRY = {
@@ -77,6 +88,7 @@ const getElement = <ElementType extends Element>(
 
 function ToolButton({ tool }: { tool: EditorTool }): ReactElement {
   const details = EDITOR_TOOL_DETAILS[tool];
+  const ToolIcon = details.icon;
   return (
     <Button
       aria-label={details.label}
@@ -88,9 +100,11 @@ function ToolButton({ tool }: { tool: EditorTool }): ReactElement {
       type="button"
       variant="ghost"
     >
-      <span aria-hidden className="better-x-image-editor__tool-symbol">
-        {details.symbol}
-      </span>
+      <ToolIcon
+        aria-hidden
+        className="better-x-image-editor__icon better-x-image-editor__tool-icon"
+        weight="regular"
+      />
       <Kbd>{details.key}</Kbd>
     </Button>
   );
@@ -139,7 +153,11 @@ function ImageEditorView({
                 data-transform="rotate"
                 type="button"
               >
-                ↻
+                <ArrowClockwiseIcon
+                  aria-hidden
+                  className="better-x-image-editor__icon"
+                  weight="bold"
+                />
               </button>
               {RESIZE_HANDLES.map((handle) => (
                 <button
@@ -170,7 +188,11 @@ function ImageEditorView({
               type="button"
               variant="ghost"
             >
-              ×
+              <XIcon
+                aria-hidden
+                className="better-x-image-editor__icon"
+                weight="bold"
+              />
             </Button>
             <Button
               aria-label="Undo"
@@ -180,7 +202,11 @@ function ImageEditorView({
               type="button"
               variant="ghost"
             >
-              ↶
+              <ArrowCounterClockwiseIcon
+                aria-hidden
+                className="better-x-image-editor__icon"
+                weight="bold"
+              />
             </Button>
             <Button
               aria-label="Redo"
@@ -190,7 +216,11 @@ function ImageEditorView({
               type="button"
               variant="ghost"
             >
-              ↷
+              <ArrowClockwiseIcon
+                aria-hidden
+                className="better-x-image-editor__icon"
+                weight="bold"
+              />
             </Button>
           </Elevated>
 
@@ -213,12 +243,11 @@ function ImageEditorView({
                 type="button"
                 variant="ghost"
               >
-                <span
+                <CropIcon
                   aria-hidden
-                  className="better-x-image-editor__tool-symbol"
-                >
-                  ⌗
-                </span>
+                  className="better-x-image-editor__icon better-x-image-editor__tool-icon"
+                  weight="regular"
+                />
                 <Kbd>C</Kbd>
               </Button>
             </nav>
@@ -244,7 +273,11 @@ function ImageEditorView({
                 data-name="Button"
                 ref={inspectorTriggerRef}
               >
-                <span aria-hidden>⌁</span>
+                <SlidersHorizontalIcon
+                  aria-hidden
+                  className="better-x-image-editor__icon"
+                  weight="regular"
+                />
                 Style
               </LiquidMenuTrigger>
               <LiquidMenuContent

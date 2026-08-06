@@ -286,13 +286,15 @@ better-x-image-editor [data-name="Kbd"] {
   background: var(--brand-soft);
 }
 
-.better-x-image-editor__tool-symbol {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  font-size: 16px;
-  line-height: 1;
+.better-x-image-editor__icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.better-x-image-editor__tool-icon {
+  width: 17px;
+  height: 17px;
 }
 
 .better-x-image-editor__tool [data-name="Kbd"] {
@@ -643,10 +645,6 @@ better-x-image-editor [data-name="Kbd"] {
   white-space: nowrap;
 }
 
-.better-x-image-editor__button-icon {
-  font-size: 13px;
-}
-
 .better-x-image-editor__inspector-action [data-name="Kbd"] {
   margin-left: auto;
 }
@@ -765,6 +763,11 @@ better-x-image-editor [data-name="Kbd"] {
   color: var(--brand);
   cursor: grab;
   border-radius: 50%;
+}
+
+.better-x-image-editor__rotate-handle .better-x-image-editor__icon {
+  width: 11px;
+  height: 11px;
 }
 
 .better-x-image-editor__rotate-handle::after {

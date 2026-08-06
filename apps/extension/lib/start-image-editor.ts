@@ -145,22 +145,14 @@ const createButton = ({
   className,
   key,
   label,
-  symbol,
 }: {
   className: string;
   key?: string;
   label: string;
-  symbol?: string;
 }): HTMLButtonElement => {
   const button = createElement("button", className);
   button.type = "button";
   button.setAttribute("aria-label", label);
-  if (symbol) {
-    const icon = createElement("span", "better-x-image-editor__button-icon");
-    icon.setAttribute("aria-hidden", "true");
-    icon.textContent = symbol;
-    button.append(icon);
-  }
   button.append(
     createElement("span", "better-x-image-editor__button-label", label)
   );
@@ -1224,7 +1216,6 @@ class ImageEditor {
       className: "better-x-image-editor__inspector-action",
       key: "C",
       label: this.isCropping() ? "Finish crop" : "Crop image",
-      symbol: "⌗",
     });
     crop.addEventListener("click", () => this.toggleCropMode());
     section.append(crop);
