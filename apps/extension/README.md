@@ -30,11 +30,26 @@ act as maximums, automatically fitting unusually large posts to the viewport.
 ## Image editor
 
 Use the sparkle button beside X's media control to choose an image, or use the
-`Edit` badge on an attached image. The local editor supports centered X crop
-presets, arrows, rectangles, text, blur/redaction, a presentation background, and
-undo/redo. `A`, `R`, `T`, and `B` select tools, `G` toggles the background,
-`Command + Z` undoes, `Enter` applies the rendered image to X's native composer,
-and `Escape` cancels without changing the attachment.
+`Edit` badge on an attached image. The local editor treats images, text,
+rectangles, arrows, and blur regions as independent objects. Select an object
+directly on the canvas, then move, resize, or rotate it with the visible handles.
+A small contextual Liquid card exposes typography, appearance, image adjustments,
+opacity, arrangement, and solid or gradient canvas backgrounds. The canvas always
+fits itself to the available space; it has no navigation mode.
+
+Double-click an image or press `C` to enter non-destructive freeform crop mode.
+Drag to reposition its contents, resize the frame to change the crop, and scroll
+to zoom inside it. Press `Enter` to keep the crop or `Escape` to restore it.
+
+- `V`, `T`, `R`, `A`, and `B` select, add text, draw a rectangle, draw an arrow,
+  or add a blur region.
+- Arrow keys nudge the selected object. Hold `Shift` to nudge by ten pixels or
+  snap rotation and proportional resize.
+- `Command + D` duplicates. `[` and `]` change layer order.
+- `Command + Z` and `Shift + Command + Z` undo and redo.
+- `Command + Enter` renders the scene back into X's native composer.
+- `Escape` cancels the current crop, clears the selection, then closes without
+  changing the attachment.
 
 ## Development
 

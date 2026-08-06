@@ -1,55 +1,69 @@
 import { describe, expect, test } from "bun:test";
 import {
-  clampUnit,
-  getCenteredCropRect,
-  getImageLayout,
+  createInitialScene,
+  getSceneRenderLayout,
+  isPointInObject,
+  panImageCrop,
+  resizeImageCrop,
+  resizeSceneObject,
+  zoomImageCrop,
 } from "./image-editor.ts";
 
-describe("image editor geometry", () => {
-  test("centers X crop presets without stretching the source", () => {
-    expect(getCenteredCropRect(1600, 900, "square")).toEqual({
+describe("image editor scene", () => {
+  test("resizes objects around the opposite handle", () => {
+    const [image] = createInitialScene(1600, 900).objects;
+    const resized = resizeSceneObject(image, "east", { x: 100, y: 0 }, false);
+    expect(resized).toMatchObject({
       height: 900,
-      width: 900,
-      x: 350,
-      y: 0,
+      width: 1700,
+      x: 850,
+      y: 450,
     });
-    expect(getCenteredCropRect(1000, 1000, "portrait")).toEqual({
-      height: 1000,
+  });
+
+  test("makes crop frames freeform without stretching image content", () => {
+    const [object] = createInitialScene(1600, 900).objects;
+    if (object.kind !== "image") {
+      throw new Error("The initial scene must contain an image.");
+    }
+
+    const cropped = resizeImageCrop(object, "west", { x: 160, y: 0 });
+    expect(cropped).toMatchObject({
+      crop: { height: 1, width: 0.9, x: 0.1, y: 0 },
+      height: 900,
+      width: 1440,
+      x: 880,
+      y: 450,
+    });
+
+    const panned = panImageCrop(cropped, { x: 144, y: 0 });
+    expect(panned.crop.x).toBeCloseTo(0.01);
+
+    const zoomed = zoomImageCrop(cropped, 2, { x: 0.5, y: 0.5 });
+    expect(zoomed.crop.height).toBeCloseTo(0.5);
+    expect(zoomed.crop.width).toBeCloseTo(0.45);
+    expect(zoomed.crop.x).toBeCloseTo(0.325);
+    expect(zoomed.crop.y).toBeCloseTo(0.25);
+  });
+
+  test("hit-tests rotated objects in their local coordinates", () => {
+    const [image] = createInitialScene(400, 200).objects;
+    const rotated = { ...image, rotation: 45 };
+    expect(isPointInObject({ x: 200, y: 100 }, rotated)).toBe(true);
+    expect(isPointInObject({ x: 400, y: 300 }, rotated)).toBe(false);
+  });
+
+  test("fits the scene and presentation background to an export edge", () => {
+    const scene = createInitialScene(1600, 900);
+    scene.background.enabled = true;
+    expect(getSceneRenderLayout(scene, 872)).toEqual({
+      canvasHeight: 522,
+      canvasWidth: 872,
+      height: 450,
+      scale: 0.5,
       width: 800,
-      x: 100,
-      y: 0,
+      x: 36,
+      y: 36,
     });
-    expect(getCenteredCropRect(1600, 900, "original")).toEqual({
-      height: 900,
-      width: 1600,
-      x: 0,
-      y: 0,
-    });
-  });
-
-  test("fits the rendered image and optional presentation padding", () => {
-    const crop = getCenteredCropRect(4000, 2000, "original");
-    expect(getImageLayout(crop, 1000, false)).toEqual({
-      canvasHeight: 500,
-      canvasWidth: 1000,
-      height: 500,
-      width: 1000,
-      x: 0,
-      y: 0,
-    });
-    expect(getImageLayout(crop, 1160, true)).toEqual({
-      canvasHeight: 623,
-      canvasWidth: 1160,
-      height: 537,
-      width: 1074,
-      x: 43,
-      y: 43,
-    });
-  });
-
-  test("clamps pointer coordinates to the image", () => {
-    expect(clampUnit(-0.2)).toBe(0);
-    expect(clampUnit(0.4)).toBe(0.4);
-    expect(clampUnit(1.2)).toBe(1);
   });
 });

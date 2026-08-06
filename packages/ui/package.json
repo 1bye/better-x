@@ -5,24 +5,34 @@
   "type": "module",
   "exports": {
     "./globals.css": "./src/styles/globals.css",
+    "./liquid.css": "./src/styles/liquid.css",
     "./components/*": "./src/components/*.tsx",
+    "./liquid-menu/components/*": "./src/liquid-menu/components/*.tsx",
+    "./liquid-menu/constants/*": "./src/liquid-menu/constants/*.ts",
+    "./liquid-menu/hooks/*": "./src/liquid-menu/hooks/*.ts",
+    "./liquid-menu/lib/*": "./src/liquid-menu/lib/*.ts",
+    "./lib/surface-context": "./src/lib/surface-context.tsx",
     "./lib/*": "./src/lib/*.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/manrope": "^5.2.8",
     "@radix-ui/react-slot": "^1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "lucide-react": "^1.28.0",
     "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@better-x/config": "workspace:*",
     "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.3"
   }
