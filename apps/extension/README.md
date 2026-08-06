@@ -27,6 +27,15 @@ reply composer is open and returns when the composer closes. The shortcut toolba
 fades after a brief idle period and returns on the next key press. Selected scales
 act as maximums, automatically fitting unusually large posts to the viewport.
 
+## Image editor
+
+Use the sparkle button beside X's media control to choose an image, or use the
+`Edit` badge on an attached image. The local editor supports centered X crop
+presets, arrows, rectangles, text, blur/redaction, a presentation background, and
+undo/redo. `A`, `R`, `T`, and `B` select tools, `G` toggles the background,
+`Command + Z` undoes, `Enter` applies the rendered image to X's native composer,
+and `Escape` cancels without changing the attachment.
+
 ## Development
 
 ```sh

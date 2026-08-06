@@ -10,6 +10,10 @@ import {
   focusSettings,
   isFocusScale,
 } from "../lib/settings";
+import {
+  IMAGE_EDITOR_OPEN_ATTRIBUTE,
+  startImageEditor,
+} from "../lib/start-image-editor";
 
 import "../styles/content.css";
 
@@ -1322,7 +1326,9 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   };
 
   const shouldIgnoreKeyDown = (event: KeyboardEvent): boolean =>
-    state.isReplying || isEditableTarget(event.target);
+    state.isReplying ||
+    document.documentElement.hasAttribute(IMAGE_EDITOR_OPEN_ATTRIBUTE) ||
+    isEditableTarget(event.target);
 
   const revealToolbarForKeyDown = (event: KeyboardEvent): void => {
     if (!event.repeat) {
@@ -1496,8 +1502,13 @@ const startFocusMode = async (ctx: ContentScriptContext): Promise<void> => {
   });
 };
 
+const startExtension = async (ctx: ContentScriptContext): Promise<void> => {
+  startImageEditor(ctx);
+  await startFocusMode(ctx);
+};
+
 export default defineContentScript({
-  main: startFocusMode,
+  main: startExtension,
   matches: ["*://x.com/*", "*://*.x.com/*"],
   runAt: "document_idle",
 });
