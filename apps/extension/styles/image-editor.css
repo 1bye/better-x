@@ -131,7 +131,8 @@ better-x-image-editor * {
   transform-origin: 0 0;
 }
 
-better-x-image-editor[data-crop="true"] .better-x-image-editor__canvas {
+.better-x-image-editor__dialog[data-crop="true"]
+  .better-x-image-editor__canvas {
   cursor: move;
 }
 
@@ -804,13 +805,17 @@ better-x-image-editor [data-name="Kbd"] {
   transform: translate(-50%, -50%);
 }
 
-better-x-image-editor[data-loading="true"] .better-x-image-editor__loading,
-better-x-image-editor[data-error="true"] .better-x-image-editor__loading {
+.better-x-image-editor__dialog[data-loading="true"]
+  .better-x-image-editor__loading,
+.better-x-image-editor__dialog[data-error="true"]
+  .better-x-image-editor__loading {
   display: block;
 }
 
-better-x-image-editor[data-loading="true"] .better-x-image-editor__canvas,
-better-x-image-editor[data-error="true"] .better-x-image-editor__canvas {
+.better-x-image-editor__dialog[data-loading="true"]
+  .better-x-image-editor__canvas,
+.better-x-image-editor__dialog[data-error="true"]
+  .better-x-image-editor__canvas {
   visibility: hidden;
 }
 

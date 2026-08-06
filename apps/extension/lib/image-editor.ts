@@ -1,3 +1,5 @@
+export const IMAGE_EDITOR_OPEN_ATTRIBUTE = "data-better-x-image-editor-open";
+
 export const EDITOR_TOOLS = [
   "select",
   "arrow",

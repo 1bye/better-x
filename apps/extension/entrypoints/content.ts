@@ -1,6 +1,7 @@
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { fitFocusScale } from "../lib/focus-scale";
+import { IMAGE_EDITOR_OPEN_ATTRIBUTE } from "../lib/image-editor";
 import {
   FOCUS_SCALES,
   type FocusScale,
@@ -10,10 +11,7 @@ import {
   focusSettings,
   isFocusScale,
 } from "../lib/settings";
-import {
-  IMAGE_EDITOR_OPEN_ATTRIBUTE,
-  startImageEditor,
-} from "../lib/start-image-editor";
+import { startImageEditor } from "../lib/start-image-editor";
 
 import "../styles/content.css";
 
