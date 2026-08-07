@@ -4,8 +4,10 @@ import {
   getSceneRenderLayout,
   isPointInObject,
   panImageCrop,
+  resetImageCrop,
   resizeImageCrop,
   resizeSceneObject,
+  setImageCropAspect,
   zoomImageCrop,
 } from "./image-editor.ts";
 import {
@@ -69,6 +71,50 @@ describe("image editor scene model", () => {
       x: 36,
       y: 36,
     });
+  });
+
+  test("keeps creation defaults in the scene history document", () => {
+    const scene = createInitialScene(1200, 800);
+    expect(scene.toolDefaults).toMatchObject({
+      arrow: {
+        arrowhead: "open",
+        lineStyle: "solid",
+        opacity: 1,
+      },
+      blur: {
+        feather: 8,
+        shape: "rectangle",
+      },
+      rectangle: {
+        opacity: 1,
+        radius: 18,
+      },
+      text: {
+        align: "left",
+        fontWeight: 700,
+        opacity: 1,
+      },
+    });
+  });
+
+  test("applies and resets crop aspect ratios without stretching pixels", () => {
+    const [object] = createInitialScene(1600, 900).objects;
+    if (object.kind !== "image") {
+      throw new Error("The initial scene must contain an image.");
+    }
+
+    const square = setImageCropAspect(object, 1600, 900, 1);
+    expect(square.cropAspect).toBe(1);
+    expect(square.crop.width).toBeCloseTo(0.5625);
+    expect(square.width / square.height).toBeCloseTo(1);
+
+    const reset = resetImageCrop(square);
+    expect(reset.crop).toEqual({ height: 1, width: 1, x: 0, y: 0 });
+    expect(reset.width).toBeCloseTo(1600);
+    expect(reset.height).toBeCloseTo(900);
+
+    const freeform = resizeImageCrop(square, "east", { x: 20, y: 0 });
+    expect(freeform.cropAspect).toBeNull();
   });
 });
 

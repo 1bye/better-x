@@ -3,6 +3,12 @@ import { Button } from "@better-x/ui/components/button";
 import { Elevated } from "@better-x/ui/components/elevated";
 import { Kbd } from "@better-x/ui/components/kbd";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@better-x/ui/components/tooltip";
+import {
   LiquidMenuContent,
   LiquidMenuRoot,
   LiquidMenuTrigger,
@@ -18,19 +24,22 @@ import { CropIcon } from "@phosphor-icons/react/dist/csr/Crop";
 import { CursorIcon } from "@phosphor-icons/react/dist/csr/Cursor";
 import { DropHalfBottomIcon } from "@phosphor-icons/react/dist/csr/DropHalfBottom";
 import { RectangleIcon } from "@phosphor-icons/react/dist/csr/Rectangle";
-import { SlidersHorizontalIcon } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";
 import { TextTIcon } from "@phosphor-icons/react/dist/csr/TextT";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import {
   type CSSProperties,
+  cloneElement,
   createElement,
   forwardRef,
   type ReactElement,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
+  type RefObject,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -60,6 +69,7 @@ import {
   type ResizeHandle,
   removeSceneObject,
   reorderSceneObject,
+  resetImageCrop,
   resizeImageCrop,
   resizeSceneObject,
   type SceneBackground,
@@ -67,7 +77,9 @@ import {
   type SceneObject,
   type ScenePoint,
   type SceneRenderLayout,
+  type SceneToolStyleChange,
   scenePointToObject,
+  setImageCropAspect,
   type TextSceneObject,
   updateSceneObject,
   zoomImageCrop,
@@ -79,7 +91,11 @@ import {
   formatEditorViewTransform,
   type ImageEditorOrigin,
 } from "../lib/image-editor-viewport";
-import { ImageEditorInspector } from "./image-editor-inspector";
+import {
+  type ImageEditorConfigTool,
+  ImageEditorToolConfig,
+} from "./image-editor-tool-config";
+import { TextObjectEditor } from "./text-object-editor";
 
 import "@better-x/ui/liquid.css";
 import "../styles/image-editor.css";
@@ -99,7 +115,15 @@ export const EDITOR_TOOL_DETAILS: Record<
   text: { icon: TextTIcon, key: "T", label: "Text" },
 };
 
-const INSPECTOR_ANCHOR_GEOMETRY = {
+const TOOL_DETAILS: Record<
+  ImageEditorConfigTool,
+  { icon: Icon; key: string; label: string }
+> = {
+  ...EDITOR_TOOL_DETAILS,
+  crop: { icon: CropIcon, key: "C", label: "Crop" },
+};
+
+const TOOL_CONFIG_ANCHOR_GEOMETRY = {
   insetBlock: 0,
   insetInline: 0,
   radius: 10,
@@ -253,25 +277,95 @@ const reportAsyncError = (error: unknown): void => {
   window.reportError(error);
 };
 
-function ToolButton({
-  currentTool,
-  onSelect,
-  tool,
+function EditorTooltip({
+  children,
+  disabled = false,
+  label,
+  portalContainer,
+  shortcut,
+  theme,
 }: {
-  readonly currentTool: EditorTool;
-  readonly onSelect: (tool: EditorTool) => void;
-  readonly tool: EditorTool;
+  readonly children: ReactElement<{ "aria-describedby"?: string }>;
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly portalContainer: HTMLElement;
+  readonly shortcut?: string;
+  readonly theme: "" | "dark";
 }): ReactElement {
-  const details = EDITOR_TOOL_DETAILS[tool];
-  const ToolIcon = details.icon;
+  const tooltipId = useId();
+
   return (
+    <Tooltip disabled={disabled}>
+      <TooltipTrigger
+        render={cloneElement(children, { "aria-describedby": tooltipId })}
+      />
+      <TooltipContent
+        className="better-x-image-editor__tooltip"
+        data-liquid-theme={theme}
+        id={tooltipId}
+        portalContainer={portalContainer}
+        sideOffset={8}
+      >
+        <span>{label}</span>
+        {shortcut ? (
+          <>
+            <span aria-hidden>—</span>
+            <Kbd>{shortcut}</Kbd>
+          </>
+        ) : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const ToolButton = forwardRef<
+  HTMLButtonElement,
+  {
+    readonly disabled?: boolean;
+    readonly isActive: boolean;
+    readonly isConfigOpen: boolean;
+    readonly onActivate: (tool: ImageEditorConfigTool) => void;
+    readonly onToggleConfig: () => void;
+    readonly portalContainer: HTMLElement;
+    readonly theme: "" | "dark";
+    readonly tool: ImageEditorConfigTool;
+  }
+>(function ToolButtonComponent(
+  {
+    disabled = false,
+    isActive,
+    isConfigOpen,
+    onActivate,
+    onToggleConfig,
+    portalContainer,
+    theme,
+    tool,
+  },
+  ref
+): ReactElement {
+  const details = TOOL_DETAILS[tool];
+  const ToolIcon = details.icon;
+  const button = (
     <Button
+      aria-expanded={isActive ? isConfigOpen : undefined}
       aria-label={details.label}
-      aria-pressed={tool === currentTool}
+      aria-pressed={isActive}
       className="better-x-image-editor__tool"
-      onClick={() => onSelect(tool)}
+      disabled={disabled}
+      onClick={isActive ? undefined : () => onActivate(tool)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        event.preventDefault();
+        if (isActive) {
+          onToggleConfig();
+        } else {
+          onActivate(tool);
+        }
+      }}
+      ref={ref}
       size="icon"
-      title={`${details.label} (${details.key})`}
       type="button"
       variant="ghost"
     >
@@ -280,8 +374,234 @@ function ToolButton({
         className="better-x-image-editor__icon better-x-image-editor__tool-icon"
         weight="regular"
       />
-      <Kbd>{details.key}</Kbd>
     </Button>
+  );
+  const trigger = isActive ? <LiquidMenuTrigger render={button} /> : button;
+
+  return (
+    <EditorTooltip
+      disabled={disabled || (isActive && isConfigOpen)}
+      label={details.label}
+      portalContainer={portalContainer}
+      shortcut={details.key}
+      theme={theme}
+    >
+      {trigger}
+    </EditorTooltip>
+  );
+});
+
+interface ImageEditorStageProps {
+  readonly canvasRef: RefObject<HTMLCanvasElement | null>;
+  readonly canvasStyle: CSSProperties;
+  readonly editingText: SceneObject | null;
+  readonly errorMessage: string;
+  readonly isCropping: boolean;
+  readonly onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  readonly onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly onResize: (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    handle: ResizeHandle
+  ) => void;
+  readonly onRotate: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  readonly onTextChange: (text: string) => void;
+  readonly onTextFinish: () => void;
+  readonly onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
+  readonly selected: SceneObject | null;
+  readonly selectionStyle?: CSSProperties;
+  readonly stageRef: RefObject<HTMLDivElement | null>;
+  readonly textEditorStyle?: CSSProperties;
+}
+
+function ImageEditorStage({
+  canvasRef,
+  canvasStyle,
+  editingText,
+  errorMessage,
+  isCropping,
+  onDoubleClick,
+  onPointerCancel,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onResize,
+  onRotate,
+  onTextChange,
+  onTextFinish,
+  onWheel,
+  selected,
+  selectionStyle,
+  stageRef,
+  textEditorStyle,
+}: ImageEditorStageProps): ReactElement {
+  return (
+    // biome-ignore lint/a11y/noNoninteractiveElementInteractions: The stage is a composite canvas widget with delegated pointer handling.
+    <div
+      aria-label="Image editing stage"
+      className="better-x-image-editor__stage"
+      onDoubleClick={onDoubleClick}
+      onPointerCancel={onPointerCancel}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onWheel={onWheel}
+      ref={stageRef}
+      role="application"
+    >
+      <canvas
+        aria-label="Editable image canvas. Select and transform objects."
+        className="better-x-image-editor__canvas"
+        ref={canvasRef}
+        style={canvasStyle}
+        tabIndex={0}
+      />
+      {editingText?.kind === "text" && textEditorStyle ? (
+        <TextObjectEditor
+          key={editingText.id}
+          object={editingText}
+          onChange={onTextChange}
+          onFinish={onTextFinish}
+          style={textEditorStyle}
+        />
+      ) : null}
+      {selectionStyle && selected && selected.id !== editingText?.id ? (
+        <div
+          className="better-x-image-editor__selection"
+          data-crop={String(isCropping)}
+          data-locked={String(selected.locked)}
+          style={selectionStyle}
+        >
+          <span className="better-x-image-editor__selection-label">
+            {isCropping ? "Crop" : selected.name}
+          </span>
+          <button
+            aria-label="Rotate selected object"
+            className="better-x-image-editor__rotate-handle"
+            onPointerDown={onRotate}
+            type="button"
+          >
+            <ArrowClockwiseIcon
+              aria-hidden
+              className="better-x-image-editor__icon"
+              weight="bold"
+            />
+          </button>
+          {RESIZE_HANDLES.map((handle) => (
+            <button
+              aria-label={`Resize ${handle}`}
+              className={`better-x-image-editor__resize-handle better-x-image-editor__resize-handle--${handle}`}
+              key={handle}
+              onPointerDown={(event) => onResize(event, handle)}
+              type="button"
+            />
+          ))}
+        </div>
+      ) : null}
+      <span className="better-x-image-editor__loading">
+        {errorMessage || "Opening image…"}
+      </span>
+    </div>
+  );
+}
+
+function EditorHistoryControls({
+  canRedo,
+  canUndo,
+  closeButtonRef,
+  onClose,
+  onRedo,
+  onUndo,
+  portalContainer,
+  theme,
+}: {
+  readonly canRedo: boolean;
+  readonly canUndo: boolean;
+  readonly closeButtonRef: RefObject<HTMLButtonElement | null>;
+  readonly onClose: () => void;
+  readonly onRedo: () => void;
+  readonly onUndo: () => void;
+  readonly portalContainer: HTMLElement;
+  readonly theme: "" | "dark";
+}): ReactElement {
+  return (
+    <Elevated
+      className="better-x-image-editor__history"
+      data-name="LiquidEditorHistory"
+      offset={2}
+      shadowLevel={false}
+    >
+      <EditorTooltip
+        label="Close"
+        portalContainer={portalContainer}
+        shortcut="Esc"
+        theme={theme}
+      >
+        <Button
+          aria-label="Close image editor"
+          className="better-x-image-editor__close"
+          onClick={onClose}
+          ref={closeButtonRef}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          <XIcon
+            aria-hidden
+            className="better-x-image-editor__icon"
+            weight="bold"
+          />
+        </Button>
+      </EditorTooltip>
+      <EditorTooltip
+        disabled={!canUndo}
+        label="Undo"
+        portalContainer={portalContainer}
+        shortcut="⌘Z"
+        theme={theme}
+      >
+        <Button
+          aria-label="Undo"
+          className="better-x-image-editor__undo"
+          disabled={!canUndo}
+          onClick={onUndo}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          <ArrowCounterClockwiseIcon
+            aria-hidden
+            className="better-x-image-editor__icon"
+            weight="bold"
+          />
+        </Button>
+      </EditorTooltip>
+      <EditorTooltip
+        disabled={!canRedo}
+        label="Redo"
+        portalContainer={portalContainer}
+        shortcut="⇧⌘Z"
+        theme={theme}
+      >
+        <Button
+          aria-label="Redo"
+          className="better-x-image-editor__redo"
+          disabled={!canRedo}
+          onClick={onRedo}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          <ArrowClockwiseIcon
+            aria-hidden
+            className="better-x-image-editor__icon"
+            weight="bold"
+          />
+        </Button>
+      </EditorTooltip>
+    </Elevated>
   );
 }
 
@@ -298,22 +618,27 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
     const [currentTool, setCurrentTool] = useState<EditorTool>("select");
     const [documentState, setDocumentState] =
       useState<EditorDocumentState>(EMPTY_DOCUMENT);
+    const [editingTextId, setEditingTextId] = useState<string | null>(null);
     const [errorMessage, setErrorMessage] = useState("");
     const [hasFittedView, setHasFittedView] = useState(false);
     const [isCropping, setIsCropping] = useState(false);
-    const [isInspectorOpen, setIsInspectorOpen] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
+    const [isToolConfigOpen, setIsToolConfigOpen] = useState(false);
     const [phase, setPhase] = useState<EditorPhase>("closed");
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [session, setSession] = useState<EditorSession | null>(null);
     const [view, setView] = useState<EditorViewTransform>(INITIAL_VIEW);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
+    const configToolRef = useRef<ImageEditorConfigTool>("select");
     const cropStartRef = useRef<SceneDocument | null>(null);
     const currentToolRef = useRef(currentTool);
     const documentRef = useRef(documentState);
+    const editingTextIdRef = useRef<string | null>(editingTextId);
+    const editingTextValueRef = useRef("");
     const interactionRef = useRef<EditorInteraction | null>(null);
     const isOpenRef = useRef(isOpen);
+    const isToolConfigOpenRef = useRef(isToolConfigOpen);
     const keyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {
       // Assigned on every render so the global listener sees current state.
     });
@@ -321,14 +646,21 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
     const objectSequenceRef = useRef(0);
     const openRequestRef = useRef(0);
     const returnFocusRef = useRef<HTMLElement | null>(null);
-    const inspectorTriggerRef = useRef<HTMLButtonElement>(null);
     const selectedIdRef = useRef<string | null>(selectedId);
     const sessionRef = useRef<EditorSession | null>(session);
     const stageRef = useRef<HTMLDivElement>(null);
+    const toolButtonRefs = useRef<
+      Partial<Record<ImageEditorConfigTool, HTMLButtonElement | null>>
+    >({});
+    const toolConfigWasOpenRef = useRef(false);
     const viewRef = useRef(view);
 
     const { scene } = documentState;
     const selected = scene ? getSceneObject(scene, selectedId) : null;
+    const editingText =
+      scene && editingTextId ? getSceneObject(scene, editingTextId) : null;
+    const configTool: ImageEditorConfigTool = isCropping ? "crop" : currentTool;
+    configToolRef.current = configTool;
     const layout = useMemo(
       () => (scene ? getSceneRenderLayout(scene, EDITOR_RENDER_EDGE) : null),
       [scene]
@@ -364,6 +696,16 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       setCurrentTool(next);
     }, []);
 
+    const setEditingText = useCallback((next: string | null): void => {
+      editingTextIdRef.current = next;
+      setEditingTextId(next);
+    }, []);
+
+    const setToolConfigOpen = useCallback((next: boolean): void => {
+      isToolConfigOpenRef.current = next;
+      setIsToolConfigOpen(next);
+    }, []);
+
     const setEditorSession = useCallback((next: EditorSession | null): void => {
       sessionRef.current = next;
       setSession(next);
@@ -386,12 +728,14 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       setIsCropping(false);
       interactionRef.current = null;
       objectSequenceRef.current = 0;
+      editingTextValueRef.current = "";
       updateDocument(EMPTY_DOCUMENT);
+      setEditingText(null);
       setSelected(null);
       setTool("select");
+      setToolConfigOpen(false);
       setEditorView(INITIAL_VIEW);
       setErrorMessage("");
-      setIsInspectorOpen(false);
       setPhase("closed");
       setOpenState(false);
       host.hidden = true;
@@ -405,9 +749,11 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       portalContainer,
       setEditorSession,
       setEditorView,
+      setEditingText,
       setOpenState,
       setSelected,
       setTool,
+      setToolConfigOpen,
       updateDocument,
     ]);
 
@@ -424,12 +770,14 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         setIsCropping(false);
         interactionRef.current = null;
         objectSequenceRef.current = 0;
+        editingTextValueRef.current = "";
         updateDocument(EMPTY_DOCUMENT);
+        setEditingText(null);
         setSelected(null);
         setTool("select");
+        setToolConfigOpen(false);
         setEditorView(INITIAL_VIEW);
         setErrorMessage("");
-        setIsInspectorOpen(false);
         setPhase("loading");
 
         try {
@@ -480,9 +828,11 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         portalContainer,
         setEditorSession,
         setEditorView,
+        setEditingText,
         setOpenState,
         setSelected,
         setTool,
+        setToolConfigOpen,
         updateDocument,
       ]
     );
@@ -514,14 +864,15 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
           canvasRef.current,
           scene,
           session.image,
-          EDITOR_RENDER_EDGE
+          EDITOR_RENDER_EDGE,
+          { hiddenObjectId: editingTextId ?? undefined }
         );
       } catch (error) {
         setErrorMessage("The browser could not render this image.");
         setPhase("error");
         window.reportError(error);
       }
-    }, [scene, session]);
+    }, [editingTextId, scene, session]);
 
     useLayoutEffect(() => {
       if (isOpen && layoutRef.current) {
@@ -538,6 +889,16 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       observer.observe(stage);
       return () => observer.disconnect();
     }, [fitView, isOpen]);
+
+    useEffect(() => {
+      const wasOpen = toolConfigWasOpenRef.current;
+      toolConfigWasOpenRef.current = isToolConfigOpen;
+      if (wasOpen && !isToolConfigOpen) {
+        window.setTimeout(() =>
+          toolButtonRefs.current[configToolRef.current]?.focus()
+        );
+      }
+    }, [isToolConfigOpen]);
 
     const { close: transitionClose, state: transitionState } =
       useImageEditorTransition({
@@ -645,6 +1006,147 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       });
     }
 
+    function updateToolStyle(change: SceneToolStyleChange): void {
+      const current = documentRef.current.scene;
+      if (!current) {
+        return;
+      }
+      const objectId = selectedIdRef.current;
+      const object = objectId ? getSceneObject(current, objectId) : null;
+
+      if (change.tool === "arrow") {
+        if (object?.kind === "arrow") {
+          previewScene(
+            updateSceneObject(current, object.id, (candidate) =>
+              candidate.kind === "arrow"
+                ? { ...candidate, ...change.update }
+                : candidate
+            )
+          );
+        } else {
+          previewScene({
+            ...current,
+            toolDefaults: {
+              ...current.toolDefaults,
+              arrow: { ...current.toolDefaults.arrow, ...change.update },
+            },
+          });
+        }
+      } else if (change.tool === "rectangle") {
+        if (object?.kind === "rectangle") {
+          previewScene(
+            updateSceneObject(current, object.id, (candidate) =>
+              candidate.kind === "rectangle"
+                ? { ...candidate, ...change.update }
+                : candidate
+            )
+          );
+        } else {
+          previewScene({
+            ...current,
+            toolDefaults: {
+              ...current.toolDefaults,
+              rectangle: {
+                ...current.toolDefaults.rectangle,
+                ...change.update,
+              },
+            },
+          });
+        }
+      } else if (change.tool === "text") {
+        if (object?.kind === "text") {
+          previewScene(
+            updateSceneObject(current, object.id, (candidate) =>
+              candidate.kind === "text"
+                ? { ...candidate, ...change.update }
+                : candidate
+            )
+          );
+        } else {
+          previewScene({
+            ...current,
+            toolDefaults: {
+              ...current.toolDefaults,
+              text: { ...current.toolDefaults.text, ...change.update },
+            },
+          });
+        }
+      } else if (object?.kind === "blur") {
+        previewScene(
+          updateSceneObject(current, object.id, (candidate) =>
+            candidate.kind === "blur"
+              ? { ...candidate, ...change.update }
+              : candidate
+          )
+        );
+      } else {
+        previewScene({
+          ...current,
+          toolDefaults: {
+            ...current.toolDefaults,
+            blur: { ...current.toolDefaults.blur, ...change.update },
+          },
+        });
+      }
+    }
+
+    function updateCropAspect(ratio: number | null): void {
+      const current = documentRef.current.scene;
+      const currentSession = sessionRef.current;
+      const objectId = selectedIdRef.current;
+      if (!(current && currentSession && objectId)) {
+        return;
+      }
+      previewScene(
+        updateSceneObject(current, objectId, (object) =>
+          object.kind === "image"
+            ? setImageCropAspect(
+                object,
+                currentSession.image.width,
+                currentSession.image.height,
+                ratio
+              )
+            : object
+        )
+      );
+    }
+
+    function flipCrop(axis: "x" | "y"): void {
+      updateSelected((object) =>
+        object.kind === "image"
+          ? {
+              ...object,
+              flipX: axis === "x" ? !object.flipX : object.flipX,
+              flipY: axis === "y" ? !object.flipY : object.flipY,
+            }
+          : object
+      );
+    }
+
+    function resetCrop(): void {
+      updateSelected((object) =>
+        object.kind === "image"
+          ? {
+              ...resetImageCrop(object),
+              flipX: false,
+              flipY: false,
+              rotation: 0,
+            }
+          : object
+      );
+    }
+
+    function rotateCrop(degrees: number): void {
+      updateSelected((object) =>
+        object.kind === "image"
+          ? {
+              ...object,
+              rotation: normalizeDegrees(object.rotation + degrees),
+            }
+          : object
+      );
+    }
+
     function applyCanvasPreset(ratio: number | null): void {
       const current = documentRef.current.scene;
       const currentSession = sessionRef.current;
@@ -716,6 +1218,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       cropStartRef.current = null;
       setIsCropping(false);
+      setToolConfigOpen(false);
       commitScene();
     }
 
@@ -726,6 +1229,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       cropStartRef.current = null;
       setIsCropping(false);
+      setToolConfigOpen(false);
       previewScene(cloneScene(cropStart));
     }
 
@@ -740,6 +1244,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       cropStartRef.current = cloneScene(current);
       setIsCropping(true);
       setTool("select");
+      setToolConfigOpen(false);
     }
 
     function toggleCropMode(): void {
@@ -750,12 +1255,86 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
     }
 
+    function finishTextEditing(focusCanvas = true): void {
+      const objectId = editingTextIdRef.current;
+      if (!objectId) {
+        return;
+      }
+      editingTextIdRef.current = null;
+      setEditingTextId(null);
+      const current = documentRef.current.scene;
+      const object = current ? getSceneObject(current, objectId) : null;
+      if (current && object?.kind === "text") {
+        const text = editingTextValueRef.current;
+        if (text.length === 0) {
+          previewScene(removeSceneObject(current, objectId));
+          setSelected(null);
+        } else {
+          previewScene(
+            updateSceneObject(current, objectId, (candidate) =>
+              candidate.kind === "text" ? { ...candidate, text } : candidate
+            )
+          );
+          setSelected(objectId);
+        }
+      }
+      editingTextValueRef.current = "";
+      setTool("select");
+      setToolConfigOpen(false);
+      commitScene();
+      if (focusCanvas) {
+        window.requestAnimationFrame(() => canvasRef.current?.focus());
+      }
+    }
+
+    function beginTextEditing(objectId: string): void {
+      if (editingTextIdRef.current && editingTextIdRef.current !== objectId) {
+        finishTextEditing(false);
+      }
+      const current = documentRef.current.scene;
+      const object = current ? getSceneObject(current, objectId) : null;
+      if (object?.kind !== "text") {
+        return;
+      }
+      editingTextValueRef.current = object.text;
+      setSelected(objectId);
+      setTool("text");
+      setToolConfigOpen(false);
+      setEditingText(objectId);
+    }
+
+    function updateEditingText(text: string): void {
+      editingTextValueRef.current = text;
+    }
+
     function selectTool(tool: EditorTool): void {
+      if (editingTextIdRef.current) {
+        finishTextEditing(false);
+      }
       if (cropStartRef.current) {
         finishCropMode();
       }
+      setToolConfigOpen(false);
       setTool(tool);
       canvasRef.current?.focus();
+    }
+
+    function activateConfigTool(tool: ImageEditorConfigTool): void {
+      if (tool === "crop") {
+        if (editingTextIdRef.current) {
+          finishTextEditing(false);
+        }
+        if (!cropStartRef.current) {
+          enterCropMode();
+        }
+        canvasRef.current?.focus();
+        return;
+      }
+      selectTool(tool);
+    }
+
+    function changeToolConfigOpen(next: boolean): void {
+      setToolConfigOpen(next);
     }
 
     function selectObject(objectId: string | null): void {
@@ -764,6 +1343,11 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       setSelected(objectId);
       setTool("select");
+      if (isToolConfigOpenRef.current) {
+        changeToolConfigOpen(false);
+      } else {
+        setToolConfigOpen(false);
+      }
     }
 
     function duplicateSelected(): void {
@@ -824,6 +1408,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
     }
 
     function createObject(
+      sourceScene: SceneDocument,
       tool: Exclude<EditorTool, "select" | "text">,
       start: ScenePoint,
       end: ScenePoint,
@@ -838,7 +1423,6 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         id: identity.id,
         locked: false,
         name: identity.name,
-        opacity: 1,
         rotation: 0,
         visible: true,
         width,
@@ -848,25 +1432,21 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (tool === "arrow") {
         return {
           ...base,
+          ...sourceScene.toolDefaults.arrow,
           height: 24,
           kind: "arrow",
           rotation:
             (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI,
-          stroke: "#1d9bf0",
-          strokeWidth: 8,
           width: Math.max(12, Math.hypot(end.x - start.x, end.y - start.y)),
         };
       }
       if (tool === "blur") {
-        return { ...base, kind: "blur", strength: 24 };
+        return { ...base, ...sourceScene.toolDefaults.blur, kind: "blur" };
       }
       return {
         ...base,
-        fill: "#1d9bf0",
+        ...sourceScene.toolDefaults.rectangle,
         kind: "rectangle",
-        radius: 18,
-        stroke: "#ffffff",
-        strokeWidth: 0,
       };
     }
 
@@ -877,34 +1457,26 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       objectSequenceRef.current += 1;
       const sequence = objectSequenceRef.current;
+      const defaults = current.toolDefaults.text;
       const object: TextSceneObject = {
-        align: "left",
-        background: "transparent",
-        color: "#ffffff",
-        fontFamily: "TwitterChirp, Inter, sans-serif",
-        fontSize: Math.max(36, Math.min(current.width, current.height) * 0.06),
-        fontWeight: 700,
+        ...defaults,
         height: 140,
         id: `text-${sequence}`,
         kind: "text",
-        letterSpacing: 0,
-        lineHeight: 1.1,
         locked: false,
         name: `Text ${sequence}`,
-        opacity: 1,
         rotation: 0,
-        shadow: 8,
-        text: "Text",
+        text: "",
         visible: true,
         width: Math.min(520, current.width * 0.5),
         x: point.x,
         y: point.y,
       };
+      editingTextValueRef.current = "";
       previewScene({ ...current, objects: [...current.objects, object] });
       setSelected(object.id);
-      setTool("select");
-      setIsInspectorOpen(true);
-      commitScene();
+      setTool("text");
+      setEditingText(object.id);
     }
 
     function clientToScene(point: ScenePoint): ScenePoint | null {
@@ -1028,7 +1600,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       const sequence = objectSequenceRef.current;
       const objectName = `${EDITOR_TOOL_DETAILS[tool].label} ${sequence}`;
       const objectId = `${tool}-${sequence}`;
-      const object = createObject(tool, point, point, {
+      const object = createObject(current, tool, point, point, {
         id: objectId,
         name: objectName,
       });
@@ -1050,33 +1622,11 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       });
     }
 
-    function handleStagePointerDown(
-      event: ReactPointerEvent<HTMLDivElement>
+    function startSelectionInteraction(
+      event: ReactPointerEvent<HTMLDivElement>,
+      current: SceneDocument,
+      point: ScenePoint
     ): void {
-      const current = documentRef.current.scene;
-      if (!current || event.button !== 0) {
-        return;
-      }
-      if (event.target === event.currentTarget) {
-        selectObject(null);
-        return;
-      }
-      if (event.target !== canvasRef.current) {
-        return;
-      }
-      const point = clientToScene(getClientPoint(event));
-      if (!point) {
-        return;
-      }
-      const tool = currentToolRef.current;
-      if (tool === "text") {
-        addTextObject(point);
-        return;
-      }
-      if (tool !== "select") {
-        startCreate(event, point, tool);
-        return;
-      }
       const object = findSceneObjectAtPoint(current, point);
       if (!object) {
         selectObject(null);
@@ -1099,16 +1649,57 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       captureInteraction(event, interaction);
     }
 
+    function handleStagePointerDown(
+      event: ReactPointerEvent<HTMLDivElement>
+    ): void {
+      let current = documentRef.current.scene;
+      if (!current || event.button !== 0) {
+        return;
+      }
+      if (editingTextIdRef.current) {
+        finishTextEditing(false);
+        current = documentRef.current.scene;
+        if (!current) {
+          return;
+        }
+      }
+      if (event.target === event.currentTarget) {
+        selectObject(null);
+        return;
+      }
+      if (event.target !== canvasRef.current) {
+        return;
+      }
+      const point = clientToScene(getClientPoint(event));
+      if (!point) {
+        return;
+      }
+      const tool = currentToolRef.current;
+      if (tool === "text") {
+        addTextObject(point);
+        return;
+      }
+      if (tool !== "select") {
+        startCreate(event, point, tool);
+        return;
+      }
+      startSelectionInteraction(event, current, point);
+    }
+
     function handleStageDoubleClick(
       event: ReactMouseEvent<HTMLDivElement>
     ): void {
       const current = documentRef.current.scene;
-      if (!(current && event.target === canvasRef.current)) {
+      if (!current) {
         return;
       }
       const point = clientToScene(getClientPoint(event));
       const object = point ? findSceneObjectAtPoint(current, point) : null;
-      if (object?.kind === "image") {
+      if (object?.kind === "text") {
+        event.preventDefault();
+        event.stopPropagation();
+        beginTextEditing(object.id);
+      } else if (object?.kind === "image") {
         selectObject(object.id);
         enterCropMode();
       }
@@ -1164,6 +1755,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       if (interaction.kind === "create") {
         const object = createObject(
+          interaction.startScene,
           interaction.tool,
           interaction.startPoint,
           currentPoint,
@@ -1303,6 +1895,9 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (phase !== "ready") {
         return;
       }
+      if (editingTextIdRef.current) {
+        finishTextEditing(false);
+      }
       if (cropStartRef.current) {
         finishCropMode();
       }
@@ -1348,7 +1943,9 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
     function handleEscapeOrTab(event: KeyboardEvent): boolean {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (cropStartRef.current) {
+        if (isToolConfigOpenRef.current) {
+          changeToolConfigOpen(false);
+        } else if (cropStartRef.current) {
           cancelCropMode();
         } else if (selectedIdRef.current) {
           selectObject(null);
@@ -1357,11 +1954,16 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         }
         return true;
       }
-      if (event.key === "Tab") {
-        trapFocus(event);
-        return true;
-      }
       return false;
+    }
+
+    function handleDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
+      event.stopPropagation();
+      if (event.key === "Tab") {
+        trapFocus(event.nativeEvent);
+      } else if (event.key === "Escape") {
+        handleEscapeOrTab(event.nativeEvent);
+      }
     }
 
     function handleCommandKey(event: KeyboardEvent, key: string): boolean {
@@ -1381,6 +1983,8 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       } else if (event.key === "Enter") {
         event.preventDefault();
         applyEditor().catch(reportAsyncError);
+      } else {
+        return false;
       }
       return true;
     }
@@ -1445,6 +2049,18 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (!isOpenRef.current) {
         return;
       }
+      const { target } = event;
+      const isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+      const isNativeControl = isEditable || target instanceof HTMLButtonElement;
+      const isPortalTarget =
+        target instanceof Node && portalContainer.contains(target);
+      if (event.key === "Tab" || isNativeControl || isPortalTarget) {
+        return;
+      }
       event.stopImmediatePropagation();
       const key = event.key.toLowerCase();
       if (
@@ -1467,8 +2083,9 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         });
     }, []);
 
-    const getInspectorAnchor = useCallback(
-      (): Element | null => inspectorTriggerRef.current,
+    const getToolConfigAnchor = useCallback(
+      (): Element | null =>
+        toolButtonRefs.current[configToolRef.current] ?? null,
       []
     );
 
@@ -1476,38 +2093,48 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       transform: formatEditorViewTransform(view),
     };
 
-    let selectionStyle: CSSProperties | undefined;
-    if (selected?.visible && layout) {
+    const getObjectStyle = (
+      object: SceneObject | null
+    ): CSSProperties | undefined => {
+      if (!(object?.visible && layout)) {
+        return;
+      }
       const factor = layout.scale * view.scale;
       const centerX =
-        view.x + (layout.x + selected.x * layout.scale) * view.scale;
+        view.x + (layout.x + object.x * layout.scale) * view.scale;
       const centerY =
-        view.y + (layout.y + selected.y * layout.scale) * view.scale;
-      selectionStyle = {
-        height: selected.height * factor,
-        left: centerX - (selected.width * factor) / 2,
-        top: centerY - (selected.height * factor) / 2,
-        transform: `rotate(${selected.rotation}deg)`,
-        width: selected.width * factor,
+        view.y + (layout.y + object.y * layout.scale) * view.scale;
+      return {
+        height: object.height * factor,
+        left: centerX - (object.width * factor) / 2,
+        top: centerY - (object.height * factor) / 2,
+        transform: `rotate(${object.rotation}deg)`,
+        width: object.width * factor,
       };
-    }
+    };
 
-    let status =
-      "Canvas selected. Adjust its size and background, or choose a tool to add an object.";
-    if (phase === "loading") {
-      status = "Opening image…";
-    } else if (phase === "rendering") {
-      status = "Rendering image…";
-    } else if (errorMessage) {
-      status = errorMessage;
-    } else if (isCropping) {
-      status =
-        "Drag to reposition. Resize to crop. Scroll to zoom. Enter applies; Esc cancels.";
-    } else if (selected?.locked) {
-      status = "This object is locked. Unlock it in Arrange to transform it.";
-    } else if (selected) {
-      status =
-        "Drag to move. Resize or rotate with handles. Click outside for canvas settings.";
+    const selectionStyle = getObjectStyle(selected);
+    let textEditorStyle: CSSProperties | undefined;
+    if (editingText?.kind === "text") {
+      const objectStyle = getObjectStyle(editingText);
+      const factor = (layout?.scale ?? 1) * view.scale;
+      textEditorStyle = objectStyle
+        ? {
+            ...objectStyle,
+            background:
+              editingText.background === "transparent"
+                ? "transparent"
+                : editingText.background,
+            color: editingText.color,
+            fontFamily: editingText.fontFamily,
+            fontSize: editingText.fontSize * factor,
+            fontWeight: editingText.fontWeight,
+            letterSpacing: editingText.letterSpacing * factor,
+            lineHeight: editingText.lineHeight,
+            opacity: editingText.opacity,
+            textAlign: editingText.align,
+          }
+        : undefined;
     }
 
     if (!isOpen) {
@@ -1517,256 +2144,155 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
     return (
       <SurfaceProvider value={1}>
         <LiquidMenuStackProvider portalContainer={portalContainer}>
-          <section
-            aria-label="Better X image editor"
-            aria-modal="true"
-            className="better-x-image-editor__dialog"
-            data-crop={String(isCropping)}
-            data-error={phase === "error" ? "true" : undefined}
-            data-liquid-theme={getEditorLiquidTheme(session)}
-            data-loading={phase === "loading" ? "true" : undefined}
-            data-transition={transitionState}
-            role="dialog"
-          >
-            {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: The stage is a composite canvas widget with delegated pointer handling. */}
-            <div
-              aria-label="Image editing stage"
-              className="better-x-image-editor__stage"
-              onDoubleClick={handleStageDoubleClick}
-              onPointerCancel={finishInteraction}
-              onPointerDown={handleStagePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={finishInteraction}
-              onWheel={handleWheel}
-              ref={stageRef}
-              role="application"
+          <TooltipProvider delay={320}>
+            {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: The modal boundary contains native editor controls and stops their keys from reaching X. */}
+            <section
+              aria-label="Better X image editor"
+              aria-modal="true"
+              className="better-x-image-editor__dialog"
+              data-config-open={String(isToolConfigOpen)}
+              data-crop={String(isCropping)}
+              data-error={phase === "error" ? "true" : undefined}
+              data-liquid-theme={getEditorLiquidTheme(session)}
+              data-loading={phase === "loading" ? "true" : undefined}
+              data-text-editing={String(Boolean(editingTextId))}
+              data-transition={transitionState}
+              onKeyDown={handleDialogKeyDown}
+              role="dialog"
             >
-              <canvas
-                aria-label="Editable image canvas. Select and transform objects."
-                className="better-x-image-editor__canvas"
-                ref={canvasRef}
-                style={canvasStyle}
-                tabIndex={0}
+              <ImageEditorStage
+                canvasRef={canvasRef}
+                canvasStyle={canvasStyle}
+                editingText={editingText}
+                errorMessage={errorMessage}
+                isCropping={isCropping}
+                onDoubleClick={handleStageDoubleClick}
+                onPointerCancel={finishInteraction}
+                onPointerDown={handleStagePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={finishInteraction}
+                onResize={startResize}
+                onRotate={startRotate}
+                onTextChange={updateEditingText}
+                onTextFinish={finishTextEditing}
+                onWheel={handleWheel}
+                selected={selected}
+                selectionStyle={selectionStyle}
+                stageRef={stageRef}
+                textEditorStyle={textEditorStyle}
               />
-              {selectionStyle && selected ? (
-                <div
-                  className="better-x-image-editor__selection"
-                  data-crop={String(isCropping)}
-                  data-locked={String(selected.locked)}
-                  style={selectionStyle}
-                >
-                  <span className="better-x-image-editor__selection-label">
-                    {isCropping ? "Crop" : selected.name}
-                  </span>
-                  <button
-                    aria-label="Rotate selected object"
-                    className="better-x-image-editor__rotate-handle"
-                    onPointerDown={startRotate}
-                    type="button"
-                  >
-                    <ArrowClockwiseIcon
-                      aria-hidden
-                      className="better-x-image-editor__icon"
-                      weight="bold"
-                    />
-                  </button>
-                  {RESIZE_HANDLES.map((handle) => (
-                    <button
-                      aria-label={`Resize ${handle}`}
-                      className={`better-x-image-editor__resize-handle better-x-image-editor__resize-handle--${handle}`}
-                      key={handle}
-                      onPointerDown={(event) => startResize(event, handle)}
-                      type="button"
-                    />
-                  ))}
-                </div>
-              ) : null}
-              <span className="better-x-image-editor__loading">
-                {errorMessage || "Opening image…"}
-              </span>
-            </div>
 
-            <Elevated
-              className="better-x-image-editor__history"
-              data-name="LiquidEditorHistory"
-              offset={2}
-              shadowLevel={false}
-            >
-              <Button
-                aria-label="Close image editor"
-                className="better-x-image-editor__close"
-                onClick={() => closeEditor()}
-                ref={closeButtonRef}
-                size="icon-sm"
-                title="Close"
-                type="button"
-                variant="ghost"
-              >
-                <XIcon
-                  aria-hidden
-                  className="better-x-image-editor__icon"
-                  weight="bold"
-                />
-              </Button>
-              <Button
-                aria-label="Undo"
-                className="better-x-image-editor__undo"
-                disabled={documentState.historyIndex <= 0 || isCropping}
-                onClick={undo}
-                size="icon-sm"
-                title="Undo"
-                type="button"
-                variant="ghost"
-              >
-                <ArrowCounterClockwiseIcon
-                  aria-hidden
-                  className="better-x-image-editor__icon"
-                  weight="bold"
-                />
-              </Button>
-              <Button
-                aria-label="Redo"
-                className="better-x-image-editor__redo"
-                disabled={
-                  documentState.historyIndex < 0 ||
-                  documentState.historyIndex >=
-                    documentState.history.length - 1 ||
-                  isCropping
+              <EditorHistoryControls
+                canRedo={
+                  documentState.historyIndex >= 0 &&
+                  documentState.historyIndex <
+                    documentState.history.length - 1 &&
+                  !isCropping
                 }
-                onClick={redo}
-                size="icon-sm"
-                title="Redo"
-                type="button"
-                variant="ghost"
-              >
-                <ArrowClockwiseIcon
-                  aria-hidden
-                  className="better-x-image-editor__icon"
-                  weight="bold"
-                />
-              </Button>
-            </Elevated>
+                canUndo={documentState.historyIndex > 0 && !isCropping}
+                closeButtonRef={closeButtonRef}
+                onClose={closeEditor}
+                onRedo={redo}
+                onUndo={undo}
+                portalContainer={portalContainer}
+                theme={getEditorLiquidTheme(session)}
+              />
 
-            <Elevated
-              className="better-x-image-editor__toolbar"
-              data-name="LiquidEditorToolbar"
-              offset={2}
-              shadowLevel={false}
-            >
-              <nav aria-label="Image editor tools">
-                {EDITOR_TOOLS.map((tool) => (
-                  <ToolButton
-                    currentTool={currentTool}
-                    key={tool}
-                    onSelect={selectTool}
-                    tool={tool}
-                  />
-                ))}
+              <Elevated
+                className="better-x-image-editor__toolbar"
+                data-name="LiquidEditorToolbar"
+                offset={2}
+                shadowLevel={false}
+              >
+                <LiquidMenuRoot
+                  anchor={getToolConfigAnchor}
+                  anchorGeometry={TOOL_CONFIG_ANCHOR_GEOMETRY}
+                  modal={false}
+                  onOpenChange={changeToolConfigOpen}
+                  open={isToolConfigOpen}
+                >
+                  <nav aria-label="Image editor tools">
+                    {[...EDITOR_TOOLS, "crop" as const].map((tool) => {
+                      const isActive = configTool === tool;
+                      return (
+                        <ToolButton
+                          disabled={
+                            tool === "crop" && selected?.kind !== "image"
+                          }
+                          isActive={isActive}
+                          isConfigOpen={isToolConfigOpen}
+                          key={tool}
+                          onActivate={activateConfigTool}
+                          onToggleConfig={() =>
+                            changeToolConfigOpen(!isToolConfigOpenRef.current)
+                          }
+                          portalContainer={portalContainer}
+                          ref={(element) => {
+                            toolButtonRefs.current[tool] = element;
+                          }}
+                          theme={getEditorLiquidTheme(session)}
+                          tool={tool}
+                        />
+                      );
+                    })}
+                  </nav>
+                  <LiquidMenuContent
+                    align="center"
+                    aria-label={`${TOOL_DETAILS[configTool].label} configuration`}
+                    className="better-x-image-editor__inspector-surface"
+                    data-liquid-theme={getEditorLiquidTheme(session)}
+                    onKeyDown={(event) => event.stopPropagation()}
+                    side="top"
+                    sideOffset={10}
+                  >
+                    <LiquidMenuAutoSize>
+                      {scene ? (
+                        <ImageEditorToolConfig
+                          isCropping={isCropping}
+                          onCanvasPreset={applyCanvasPreset}
+                          onCanvasUpdate={updateCanvas}
+                          onCommit={commitScene}
+                          onCropAspect={updateCropAspect}
+                          onCropFlip={flipCrop}
+                          onCropReset={resetCrop}
+                          onCropRotate={rotateCrop}
+                          onDelete={deleteSelected}
+                          onDuplicate={duplicateSelected}
+                          onReorder={reorderSelected}
+                          onToggleCrop={toggleCropMode}
+                          onUpdateBackground={updateBackground}
+                          onUpdateSelected={updateSelected}
+                          onUpdateToolStyle={updateToolStyle}
+                          scene={scene}
+                          selected={selected}
+                          tool={configTool}
+                        />
+                      ) : null}
+                    </LiquidMenuAutoSize>
+                  </LiquidMenuContent>
+                </LiquidMenuRoot>
+              </Elevated>
+
+              <Elevated
+                className="better-x-image-editor__top-actions"
+                data-name="LiquidEditorActions"
+                offset={2}
+                shadowLevel={false}
+              >
                 <Button
-                  aria-label="Crop selected image"
-                  aria-pressed={isCropping}
-                  className="better-x-image-editor__tool better-x-image-editor__crop"
-                  disabled={selected?.kind !== "image"}
-                  onClick={toggleCropMode}
-                  size="icon"
-                  title="Crop selected image (C)"
+                  className="better-x-image-editor__apply"
+                  disabled={phase !== "ready"}
+                  onClick={() => applyEditor().catch(reportAsyncError)}
+                  size="sm"
                   type="button"
-                  variant="ghost"
+                  variant="brand"
                 >
-                  <CropIcon
-                    aria-hidden
-                    className="better-x-image-editor__icon better-x-image-editor__tool-icon"
-                    weight="regular"
-                  />
-                  <Kbd>C</Kbd>
+                  Apply
+                  <Kbd>⌘↵</Kbd>
                 </Button>
-              </nav>
-            </Elevated>
-
-            <Elevated
-              className="better-x-image-editor__top-actions"
-              data-name="LiquidEditorActions"
-              offset={2}
-              shadowLevel={false}
-            >
-              <LiquidMenuRoot
-                anchor={getInspectorAnchor}
-                anchorGeometry={INSPECTOR_ANCHOR_GEOMETRY}
-                modal={false}
-                onOpenChange={setIsInspectorOpen}
-                open={isInspectorOpen}
-              >
-                <LiquidMenuTrigger
-                  aria-label="Toggle object properties"
-                  aria-pressed={isInspectorOpen}
-                  className="better-x-image-editor__properties-trigger"
-                  data-name="Button"
-                  ref={inspectorTriggerRef}
-                >
-                  <SlidersHorizontalIcon
-                    aria-hidden
-                    className="better-x-image-editor__icon"
-                    weight="regular"
-                  />
-                  Style
-                </LiquidMenuTrigger>
-                <LiquidMenuContent
-                  align="end"
-                  aria-label="Object properties"
-                  className="better-x-image-editor__inspector-surface"
-                  data-liquid-theme={getEditorLiquidTheme(session)}
-                  portalKeepMounted
-                  sideOffset={10}
-                >
-                  <LiquidMenuAutoSize>
-                    {scene ? (
-                      <ImageEditorInspector
-                        isCropping={isCropping}
-                        onCanvasPreset={applyCanvasPreset}
-                        onCanvasUpdate={updateCanvas}
-                        onCommit={commitScene}
-                        onDelete={deleteSelected}
-                        onDuplicate={duplicateSelected}
-                        onReorder={reorderSelected}
-                        onToggleCrop={toggleCropMode}
-                        onUpdateBackground={updateBackground}
-                        onUpdateSelected={updateSelected}
-                        scene={scene}
-                        selected={selected}
-                      />
-                    ) : null}
-                  </LiquidMenuAutoSize>
-                </LiquidMenuContent>
-              </LiquidMenuRoot>
-
-              <Button
-                className="better-x-image-editor__apply"
-                disabled={phase !== "ready"}
-                onClick={() => applyEditor().catch(reportAsyncError)}
-                size="sm"
-                type="button"
-                variant="brand"
-              >
-                Apply
-                <Kbd>⌘↵</Kbd>
-              </Button>
-            </Elevated>
-
-            <Elevated
-              className="better-x-image-editor__status-surface"
-              data-name="LiquidEditorStatus"
-              offset={1}
-              shadowLevel={false}
-            >
-              <span
-                aria-live="polite"
-                className="better-x-image-editor__status"
-                role="status"
-              >
-                {status}
-              </span>
-            </Elevated>
-          </section>
+              </Elevated>
+            </section>
+          </TooltipProvider>
         </LiquidMenuStackProvider>
       </SurfaceProvider>
     );

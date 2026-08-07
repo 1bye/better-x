@@ -63,6 +63,7 @@ const drawImageObject = (
   );
   context.clip();
   context.filter = `brightness(${object.brightness}%) contrast(${object.contrast}%) saturate(${object.saturation}%)`;
+  context.scale(object.flipX ? -1 : 1, object.flipY ? -1 : 1);
   context.drawImage(
     image,
     object.crop.x * image.width,
@@ -103,20 +104,40 @@ const drawArrowObject = (
   object: ArrowSceneObject
 ): void => {
   const head = Math.max(12, object.strokeWidth * 4.5);
+  let lineDash: number[] = [];
+  if (object.lineStyle === "dashed") {
+    lineDash = [object.strokeWidth * 3, object.strokeWidth * 2];
+  } else if (object.lineStyle === "dotted") {
+    lineDash = [0, object.strokeWidth * 2];
+  }
   context.beginPath();
   context.moveTo(-object.width / 2, 0);
   context.lineTo(object.width / 2, 0);
-  context.moveTo(object.width / 2, 0);
-  context.lineTo(object.width / 2 - head, -head * 0.55);
-  context.moveTo(object.width / 2, 0);
-  context.lineTo(object.width / 2 - head, head * 0.55);
   context.lineCap = "round";
   context.lineJoin = "round";
   context.lineWidth = object.strokeWidth;
+  context.setLineDash(lineDash);
   context.shadowBlur = object.strokeWidth;
   context.shadowColor = "rgb(0 0 0 / 40%)";
   context.strokeStyle = object.stroke;
   context.stroke();
+
+  if (object.arrowhead === "none") {
+    return;
+  }
+
+  context.setLineDash([]);
+  context.beginPath();
+  context.moveTo(object.width / 2 - head, -head * 0.55);
+  context.lineTo(object.width / 2, 0);
+  context.lineTo(object.width / 2 - head, head * 0.55);
+  if (object.arrowhead === "filled") {
+    context.closePath();
+    context.fillStyle = object.stroke;
+    context.fill();
+  } else {
+    context.stroke();
+  }
 };
 
 const wrapText = (
@@ -250,25 +271,53 @@ const drawBlurObject = (
   snapshot.width = canvas.width;
   snapshot.height = canvas.height;
   snapshot.getContext("2d")?.drawImage(canvas, 0, 0);
-  context.save();
-  context.translate(
+
+  const effect = document.createElement("canvas");
+  effect.width = canvas.width;
+  effect.height = canvas.height;
+  const effectContext = effect.getContext("2d");
+  if (!effectContext) {
+    return;
+  }
+  effectContext.filter = `blur(${object.strength * layout.scale}px)`;
+  effectContext.drawImage(snapshot, 0, 0);
+  effectContext.globalCompositeOperation = "destination-in";
+  effectContext.filter =
+    object.feather > 0 ? `blur(${object.feather * layout.scale}px)` : "none";
+  effectContext.save();
+  effectContext.translate(
     layout.x + object.x * layout.scale,
     layout.y + object.y * layout.scale
   );
-  context.rotate((object.rotation * Math.PI) / 180);
-  context.scale(layout.scale, layout.scale);
+  effectContext.rotate((object.rotation * Math.PI) / 180);
+  effectContext.scale(layout.scale, layout.scale);
+  effectContext.fillStyle = "#fff";
+  effectContext.beginPath();
+  if (object.shape === "ellipse") {
+    effectContext.ellipse(
+      0,
+      0,
+      object.width / 2,
+      object.height / 2,
+      0,
+      0,
+      Math.PI * 2
+    );
+  } else {
+    effectContext.roundRect(
+      -object.width / 2,
+      -object.height / 2,
+      object.width,
+      object.height,
+      object.radius
+    );
+  }
+  effectContext.fill();
+  effectContext.restore();
+
+  context.save();
   context.globalAlpha = object.opacity;
-  context.beginPath();
-  context.rect(
-    -object.width / 2,
-    -object.height / 2,
-    object.width,
-    object.height
-  );
-  context.clip();
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  context.filter = `blur(${object.strength * layout.scale}px)`;
-  context.drawImage(snapshot, 0, 0);
+  context.drawImage(effect, 0, 0);
   context.restore();
 };
 
@@ -277,10 +326,11 @@ const drawObjects = (
   canvas: HTMLCanvasElement,
   scene: SceneDocument,
   layout: SceneRenderLayout,
-  image: ImageBitmap
+  image: ImageBitmap,
+  hiddenObjectId?: string
 ): void => {
   for (const object of scene.objects) {
-    if (!object.visible) {
+    if (!object.visible || object.id === hiddenObjectId) {
       continue;
     }
     if (object.kind === "blur") {
@@ -295,7 +345,8 @@ export const drawImageEditorScene = (
   canvas: HTMLCanvasElement,
   scene: SceneDocument,
   image: ImageBitmap,
-  maxEdge: number
+  maxEdge: number,
+  options: { hiddenObjectId?: string } = {}
 ): SceneRenderLayout => {
   const layout = getSceneRenderLayout(scene, maxEdge);
   canvas.width = layout.canvasWidth;
@@ -334,10 +385,10 @@ export const drawImageEditorScene = (
       scene.background.radius * layout.scale
     );
     context.clip();
-    drawObjects(context, canvas, scene, layout, image);
+    drawObjects(context, canvas, scene, layout, image, options.hiddenObjectId);
     context.restore();
   } else {
-    drawObjects(context, canvas, scene, layout, image);
+    drawObjects(context, canvas, scene, layout, image, options.hiddenObjectId);
   }
   return layout;
 };

@@ -21,6 +21,9 @@ export const RESIZE_HANDLES = [
 
 export type EditorTool = (typeof EDITOR_TOOLS)[number];
 export type ResizeHandle = (typeof RESIZE_HANDLES)[number];
+export type ArrowheadStyle = "filled" | "none" | "open";
+export type ArrowLineStyle = "dashed" | "dotted" | "solid";
+export type BlurShape = "ellipse" | "rectangle";
 
 export interface ScenePoint {
   x: number;
@@ -62,6 +65,9 @@ export interface ImageSceneObject extends SceneObjectBase {
   brightness: number;
   contrast: number;
   crop: SceneCrop;
+  cropAspect: number | null;
+  flipX: boolean;
+  flipY: boolean;
   kind: "image";
   radius: number;
   saturation: number;
@@ -90,13 +96,18 @@ export interface RectangleSceneObject extends SceneObjectBase {
 }
 
 export interface ArrowSceneObject extends SceneObjectBase {
+  arrowhead: ArrowheadStyle;
   kind: "arrow";
+  lineStyle: ArrowLineStyle;
   stroke: string;
   strokeWidth: number;
 }
 
 export interface BlurSceneObject extends SceneObjectBase {
+  feather: number;
   kind: "blur";
+  radius: number;
+  shape: BlurShape;
   strength: number;
 }
 
@@ -107,10 +118,48 @@ export type SceneObject =
   | RectangleSceneObject
   | TextSceneObject;
 
+export interface SceneToolDefaults {
+  arrow: Pick<
+    ArrowSceneObject,
+    "arrowhead" | "lineStyle" | "opacity" | "stroke" | "strokeWidth"
+  >;
+  blur: Pick<
+    BlurSceneObject,
+    "feather" | "opacity" | "radius" | "shape" | "strength"
+  >;
+  rectangle: Pick<
+    RectangleSceneObject,
+    "fill" | "opacity" | "radius" | "stroke" | "strokeWidth"
+  >;
+  text: Pick<
+    TextSceneObject,
+    | "align"
+    | "background"
+    | "color"
+    | "fontFamily"
+    | "fontSize"
+    | "fontWeight"
+    | "letterSpacing"
+    | "lineHeight"
+    | "opacity"
+    | "shadow"
+  >;
+}
+
+export type SceneStyleTool = keyof SceneToolDefaults;
+
+export type SceneToolStyleChange = {
+  [Tool in SceneStyleTool]: {
+    tool: Tool;
+    update: Partial<SceneToolDefaults[Tool]>;
+  };
+}[SceneStyleTool];
+
 export interface SceneDocument {
   background: SceneBackground;
   height: number;
   objects: readonly SceneObject[];
+  toolDefaults: SceneToolDefaults;
   width: number;
 }
 
@@ -136,6 +185,45 @@ export const clamp = (
 export const cloneScene = (scene: SceneDocument): SceneDocument =>
   structuredClone(scene);
 
+export const createSceneToolDefaults = (
+  imageWidth: number,
+  imageHeight: number
+): SceneToolDefaults => ({
+  arrow: {
+    arrowhead: "open",
+    lineStyle: "solid",
+    opacity: 1,
+    stroke: "#1d9bf0",
+    strokeWidth: 8,
+  },
+  blur: {
+    feather: 8,
+    opacity: 1,
+    radius: 18,
+    shape: "rectangle",
+    strength: 24,
+  },
+  rectangle: {
+    fill: "#1d9bf0",
+    opacity: 1,
+    radius: 18,
+    stroke: "#ffffff",
+    strokeWidth: 0,
+  },
+  text: {
+    align: "left",
+    background: "transparent",
+    color: "#ffffff",
+    fontFamily: "TwitterChirp, Inter, sans-serif",
+    fontSize: Math.max(36, Math.min(imageWidth, imageHeight) * 0.06),
+    fontWeight: 700,
+    letterSpacing: 0,
+    lineHeight: 1.1,
+    opacity: 1,
+    shadow: 8,
+  },
+});
+
 export const createInitialScene = (
   imageWidth: number,
   imageHeight: number
@@ -156,6 +244,9 @@ export const createInitialScene = (
       brightness: 100,
       contrast: 100,
       crop: { height: 1, width: 1, x: 0, y: 0 },
+      cropAspect: null,
+      flipX: false,
+      flipY: false,
       height: imageHeight,
       id: "image",
       kind: "image",
@@ -171,6 +262,7 @@ export const createInitialScene = (
       y: imageHeight / 2,
     },
   ],
+  toolDefaults: createSceneToolDefaults(imageWidth, imageHeight),
   width: imageWidth,
 });
 
@@ -384,12 +476,62 @@ export const resizeImageCrop = (
       x: left,
       y: top,
     },
+    cropAspect: null,
     height: object.height + bottomShift - topShift,
     width: object.width + rightShift - leftShift,
     x: object.x + worldShift.x,
     y: object.y + worldShift.y,
   };
 };
+
+export const setImageCropAspect = (
+  object: ImageSceneObject,
+  imageWidth: number,
+  imageHeight: number,
+  ratio: number | null
+): ImageSceneObject => {
+  if (!ratio) {
+    return { ...object, cropAspect: null };
+  }
+
+  const sourceWidth = object.crop.width * imageWidth;
+  const sourceHeight = object.crop.height * imageHeight;
+  const currentRatio = sourceWidth / Math.max(1, sourceHeight);
+  let cropWidth = object.crop.width;
+  let cropHeight = object.crop.height;
+
+  if (currentRatio > ratio) {
+    cropWidth = (sourceHeight * ratio) / imageWidth;
+  } else {
+    cropHeight = sourceWidth / ratio / imageHeight;
+  }
+
+  cropWidth = clamp(cropWidth, MIN_CROP_SIZE, 1);
+  cropHeight = clamp(cropHeight, MIN_CROP_SIZE, 1);
+  const centerX = object.crop.x + object.crop.width / 2;
+  const centerY = object.crop.y + object.crop.height / 2;
+
+  return {
+    ...object,
+    crop: {
+      height: cropHeight,
+      width: cropWidth,
+      x: clamp(centerX - cropWidth / 2, 0, 1 - cropWidth),
+      y: clamp(centerY - cropHeight / 2, 0, 1 - cropHeight),
+    },
+    cropAspect: ratio,
+    height: object.height * (cropHeight / object.crop.height),
+    width: object.width * (cropWidth / object.crop.width),
+  };
+};
+
+export const resetImageCrop = (object: ImageSceneObject): ImageSceneObject => ({
+  ...object,
+  crop: { height: 1, width: 1, x: 0, y: 0 },
+  cropAspect: null,
+  height: object.height / object.crop.height,
+  width: object.width / object.crop.width,
+});
 
 export const panImageCrop = (
   object: ImageSceneObject,
