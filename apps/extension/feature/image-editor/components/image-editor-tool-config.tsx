@@ -61,6 +61,22 @@ interface RangeControlProps extends ValueControlProps {
   readonly step?: number;
 }
 
+const isToolSelectionTarget = (
+  tool: ImageEditorConfigTool,
+  selected: SceneObject | null
+): boolean => {
+  if (!selected) {
+    return false;
+  }
+  if (tool === "select") {
+    return true;
+  }
+  if (tool === "crop") {
+    return selected.kind === "image";
+  }
+  return selected.kind === tool;
+};
+
 function ConfigSection({
   children,
   title,
@@ -309,15 +325,77 @@ function ArrowConfig({
           value={value.lineStyle}
         />
       </Field>
-      <Field label="Head">
+      <Field label="Path">
         <SelectControl
-          label="Arrowhead"
+          label="Arrow path style"
           onCommit={onCommit}
-          onValue={(arrowhead) =>
+          onValue={(pathStyle) =>
             onUpdate({
-              arrowhead:
-                arrowhead === "filled" || arrowhead === "none"
-                  ? arrowhead
+              pathStyle: pathStyle === "straight" ? "straight" : "curved",
+            })
+          }
+          options={[
+            { label: "Curved", value: "curved" },
+            { label: "Straight", value: "straight" },
+          ]}
+          value={value.pathStyle}
+        />
+      </Field>
+      {value.pathStyle === "curved" ? (
+        <Field label="Bend">
+          <RangeControl
+            label="Arrow bend amount"
+            maximum={300}
+            minimum={-300}
+            onCommit={onCommit}
+            onValue={(bend) => onUpdate({ bend })}
+            value={value.bend}
+          />
+        </Field>
+      ) : null}
+      <Field label="Appearance">
+        <SelectControl
+          label="Arrow appearance"
+          onCommit={onCommit}
+          onValue={(drawStyle) =>
+            onUpdate({ drawStyle: drawStyle === "clean" ? "clean" : "draw" })
+          }
+          options={[
+            { label: "Hand-drawn", value: "draw" },
+            { label: "Clean", value: "clean" },
+          ]}
+          value={value.drawStyle}
+        />
+      </Field>
+      <Field label="Start">
+        <SelectControl
+          label="Start arrowhead"
+          onCommit={onCommit}
+          onValue={(startArrowhead) =>
+            onUpdate({
+              startArrowhead:
+                startArrowhead === "filled" || startArrowhead === "open"
+                  ? startArrowhead
+                  : "none",
+            })
+          }
+          options={[
+            { label: "None", value: "none" },
+            { label: "Open", value: "open" },
+            { label: "Filled", value: "filled" },
+          ]}
+          value={value.startArrowhead}
+        />
+      </Field>
+      <Field label="End">
+        <SelectControl
+          label="End arrowhead"
+          onCommit={onCommit}
+          onValue={(endArrowhead) =>
+            onUpdate({
+              endArrowhead:
+                endArrowhead === "filled" || endArrowhead === "none"
+                  ? endArrowhead
                   : "open",
             })
           }
@@ -326,7 +404,7 @@ function ArrowConfig({
             { label: "Filled", value: "filled" },
             { label: "None", value: "none" },
           ]}
-          value={value.arrowhead}
+          value={value.endArrowhead}
         />
       </Field>
       <OpacityControl
@@ -1113,8 +1191,7 @@ export function ImageEditorToolConfig({
   selected,
   tool,
 }: ImageEditorToolConfigProps): ReactElement {
-  const isSelectionTarget =
-    tool === "crop" ? selected?.kind === "image" : selected?.kind === tool;
+  const isSelectionTarget = isToolSelectionTarget(tool, selected);
 
   let content: ReactNode;
   if (tool !== "select" && tool !== "crop") {

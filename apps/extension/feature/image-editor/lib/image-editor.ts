@@ -1,3 +1,5 @@
+import { getArrowGeometry, isPointInArrowGeometry } from "./arrow-geometry";
+
 export const IMAGE_EDITOR_OPEN_ATTRIBUTE = "data-better-x-image-editor-open";
 
 export const EDITOR_TOOLS = [
@@ -21,8 +23,10 @@ export const RESIZE_HANDLES = [
 
 export type EditorTool = (typeof EDITOR_TOOLS)[number];
 export type ResizeHandle = (typeof RESIZE_HANDLES)[number];
+export type ArrowDrawStyle = "clean" | "draw";
 export type ArrowheadStyle = "filled" | "none" | "open";
 export type ArrowLineStyle = "dashed" | "dotted" | "solid";
+export type ArrowPathStyle = "curved" | "straight";
 export type BlurShape = "ellipse" | "rectangle";
 
 export interface ScenePoint {
@@ -96,9 +100,13 @@ export interface RectangleSceneObject extends SceneObjectBase {
 }
 
 export interface ArrowSceneObject extends SceneObjectBase {
-  arrowhead: ArrowheadStyle;
+  bend: number;
+  drawStyle: ArrowDrawStyle;
+  endArrowhead: ArrowheadStyle;
   kind: "arrow";
   lineStyle: ArrowLineStyle;
+  pathStyle: ArrowPathStyle;
+  startArrowhead: ArrowheadStyle;
   stroke: string;
   strokeWidth: number;
 }
@@ -121,7 +129,15 @@ export type SceneObject =
 export interface SceneToolDefaults {
   arrow: Pick<
     ArrowSceneObject,
-    "arrowhead" | "lineStyle" | "opacity" | "stroke" | "strokeWidth"
+    | "bend"
+    | "drawStyle"
+    | "endArrowhead"
+    | "lineStyle"
+    | "opacity"
+    | "pathStyle"
+    | "startArrowhead"
+    | "stroke"
+    | "strokeWidth"
   >;
   blur: Pick<
     BlurSceneObject,
@@ -190,9 +206,13 @@ export const createSceneToolDefaults = (
   imageHeight: number
 ): SceneToolDefaults => ({
   arrow: {
-    arrowhead: "open",
+    bend: clamp(Math.min(imageWidth, imageHeight) * 0.035, 18, 72),
+    drawStyle: "draw",
+    endArrowhead: "open",
     lineStyle: "solid",
     opacity: 1,
+    pathStyle: "curved",
+    startArrowhead: "none",
     stroke: "#1d9bf0",
     strokeWidth: 8,
   },
@@ -354,11 +374,52 @@ export const scenePointToObject = (
     -object.rotation
   );
 
+export interface SceneObjectLocalBounds {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}
+
+export const getSceneObjectLocalBounds = (
+  object: SceneObject
+): SceneObjectLocalBounds =>
+  object.kind === "arrow"
+    ? getArrowGeometry(object).bounds
+    : {
+        height: object.height,
+        width: object.width,
+        x: -object.width / 2,
+        y: -object.height / 2,
+      };
+
+export const getSceneObjectCorners = (
+  object: SceneObject
+): readonly ScenePoint[] => {
+  const bounds = getSceneObjectLocalBounds(object);
+  return [
+    { x: bounds.x, y: bounds.y },
+    { x: bounds.x + bounds.width, y: bounds.y },
+    { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+    { x: bounds.x, y: bounds.y + bounds.height },
+  ].map((point) => {
+    const rotated = rotatePoint(point, object.rotation);
+    return { x: object.x + rotated.x, y: object.y + rotated.y };
+  });
+};
+
 export const isPointInObject = (
   point: ScenePoint,
   object: SceneObject
 ): boolean => {
   const local = scenePointToObject(point, object);
+  if (object.kind === "arrow") {
+    return isPointInArrowGeometry(
+      local,
+      getArrowGeometry(object),
+      object.strokeWidth
+    );
+  }
   return (
     Math.abs(local.x) <= object.width / 2 &&
     Math.abs(local.y) <= object.height / 2
@@ -403,6 +464,26 @@ export const resizeSceneObject = (
 ): SceneObject => {
   const delta = rotatePoint(worldDelta, -object.rotation);
   const { horizontal, vertical } = getHandleAxes(handle);
+  if (object.kind === "arrow") {
+    if (!horizontal) {
+      return object;
+    }
+    const width = Math.max(
+      MIN_OBJECT_SIZE,
+      object.width + delta.x * horizontal
+    );
+    const localShift = {
+      x: horizontal * (width - object.width) * 0.5,
+      y: 0,
+    };
+    const worldShift = rotatePoint(localShift, object.rotation);
+    return fitArrowSceneObject({
+      ...object,
+      width,
+      x: object.x + worldShift.x,
+      y: object.y + worldShift.y,
+    });
+  }
   let width = Math.max(MIN_OBJECT_SIZE, object.width + delta.x * horizontal);
   let height = Math.max(MIN_OBJECT_SIZE, object.height + delta.y * vertical);
 
@@ -430,6 +511,13 @@ export const resizeSceneObject = (
     y: object.y + worldShift.y,
   };
 };
+
+export const fitArrowSceneObject = (
+  object: ArrowSceneObject
+): ArrowSceneObject => ({
+  ...object,
+  height: getArrowGeometry(object).bounds.height,
+});
 
 export const resizeImageCrop = (
   object: ImageSceneObject,

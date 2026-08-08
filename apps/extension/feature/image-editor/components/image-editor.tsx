@@ -58,7 +58,10 @@ import {
   EDITOR_TOOLS,
   type EditorTool,
   findSceneObjectAtPoint,
+  fitArrowSceneObject,
   getSceneObject,
+  getSceneObjectCorners,
+  getSceneObjectLocalBounds,
   getSceneRenderLayout,
   getSnappedPosition,
   IMAGE_EDITOR_OPEN_ATTRIBUTE,
@@ -84,7 +87,11 @@ import {
   updateSceneObject,
   zoomImageCrop,
 } from "../lib/image-editor";
-import { drawImageEditorScene } from "../lib/image-editor-renderer";
+import {
+  drawImageEditorScene,
+  fitTextSceneObject,
+  getTextCaretIndex,
+} from "../lib/image-editor-renderer";
 import {
   type EditorViewTransform,
   fitImageEditorView,
@@ -128,6 +135,18 @@ const TOOL_CONFIG_ANCHOR_GEOMETRY = {
   insetInline: 0,
   radius: 10,
 } as const;
+
+const HORIZONTAL_RESIZE_HANDLES: readonly ResizeHandle[] = ["east", "west"];
+
+type ObjectConfigTool = Exclude<ImageEditorConfigTool, "crop">;
+
+const OBJECT_CONFIG_TOOL: Record<SceneObject["kind"], ObjectConfigTool> = {
+  arrow: "arrow",
+  blur: "blur",
+  image: "select",
+  rectangle: "rectangle",
+  text: "text",
+};
 
 export interface OpenImageEditorOptions {
   readonly file: File;
@@ -323,7 +342,9 @@ const ToolButton = forwardRef<
   {
     readonly disabled?: boolean;
     readonly isActive: boolean;
+    readonly isConfigOwner: boolean;
     readonly isConfigOpen: boolean;
+    readonly isContextual: boolean;
     readonly onActivate: (tool: ImageEditorConfigTool) => void;
     readonly onToggleConfig: () => void;
     readonly portalContainer: HTMLElement;
@@ -334,7 +355,9 @@ const ToolButton = forwardRef<
   {
     disabled = false,
     isActive,
+    isConfigOwner,
     isConfigOpen,
+    isContextual,
     onActivate,
     onToggleConfig,
     portalContainer,
@@ -347,18 +370,20 @@ const ToolButton = forwardRef<
   const ToolIcon = details.icon;
   const button = (
     <Button
-      aria-expanded={isActive ? isConfigOpen : undefined}
+      aria-expanded={isConfigOwner ? isConfigOpen : undefined}
       aria-label={details.label}
       aria-pressed={isActive}
       className="better-x-image-editor__tool"
+      data-config-owner={isConfigOwner ? "true" : undefined}
+      data-contextual={isContextual ? "true" : undefined}
       disabled={disabled}
-      onClick={isActive ? undefined : () => onActivate(tool)}
+      onClick={isConfigOwner ? undefined : () => onActivate(tool)}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") {
           return;
         }
         event.preventDefault();
-        if (isActive) {
+        if (isConfigOwner) {
           onToggleConfig();
         } else {
           onActivate(tool);
@@ -376,11 +401,15 @@ const ToolButton = forwardRef<
       />
     </Button>
   );
-  const trigger = isActive ? <LiquidMenuTrigger render={button} /> : button;
+  const trigger = isConfigOwner ? (
+    <LiquidMenuTrigger render={button} />
+  ) : (
+    button
+  );
 
   return (
     <EditorTooltip
-      disabled={disabled || (isActive && isConfigOpen)}
+      disabled={disabled || (isConfigOwner && isConfigOpen)}
       label={details.label}
       portalContainer={portalContainer}
       shortcut={details.key}
@@ -396,6 +425,7 @@ interface ImageEditorStageProps {
   readonly canvasStyle: CSSProperties;
   readonly editingText: SceneObject | null;
   readonly errorMessage: string;
+  readonly initialTextSelection: number;
   readonly isCropping: boolean;
   readonly onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
   readonly onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -407,10 +437,12 @@ interface ImageEditorStageProps {
     handle: ResizeHandle
   ) => void;
   readonly onRotate: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  readonly onTextBlur: (nextTarget: EventTarget | null) => void;
   readonly onTextChange: (text: string) => void;
   readonly onTextFinish: () => void;
   readonly onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
   readonly selected: SceneObject | null;
+  readonly selectionPoints?: string;
   readonly selectionStyle?: CSSProperties;
   readonly stageRef: RefObject<HTMLDivElement | null>;
   readonly textEditorStyle?: CSSProperties;
@@ -421,6 +453,7 @@ function ImageEditorStage({
   canvasStyle,
   editingText,
   errorMessage,
+  initialTextSelection,
   isCropping,
   onDoubleClick,
   onPointerCancel,
@@ -429,10 +462,12 @@ function ImageEditorStage({
   onPointerUp,
   onResize,
   onRotate,
+  onTextBlur,
   onTextChange,
   onTextFinish,
   onWheel,
   selected,
+  selectionPoints,
   selectionStyle,
   stageRef,
   textEditorStyle,
@@ -460,12 +495,24 @@ function ImageEditorStage({
       />
       {editingText?.kind === "text" && textEditorStyle ? (
         <TextObjectEditor
+          initialSelection={initialTextSelection}
           key={editingText.id}
           object={editingText}
+          onBlur={onTextBlur}
           onChange={onTextChange}
           onFinish={onTextFinish}
           style={textEditorStyle}
         />
+      ) : null}
+      {selectionPoints && selected && selected.id !== editingText?.id ? (
+        <svg
+          aria-hidden
+          className="better-x-image-editor__selection-outline"
+          data-crop={String(isCropping)}
+        >
+          <title>Selection outline</title>
+          <polygon points={selectionPoints} vectorEffect="non-scaling-stroke" />
+        </svg>
       ) : null}
       {selectionStyle && selected && selected.id !== editingText?.id ? (
         <div
@@ -489,7 +536,10 @@ function ImageEditorStage({
               weight="bold"
             />
           </button>
-          {RESIZE_HANDLES.map((handle) => (
+          {(selected.kind === "arrow" || selected.kind === "text"
+            ? HORIZONTAL_RESIZE_HANDLES
+            : RESIZE_HANDLES
+          ).map((handle) => (
             <button
               aria-label={`Resize ${handle}`}
               className={`better-x-image-editor__resize-handle better-x-image-editor__resize-handle--${handle}`}
@@ -615,7 +665,9 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
     { host, portalContainer },
     imperativeRef
   ): ReactElement | null {
-    const [currentTool, setCurrentTool] = useState<EditorTool>("select");
+    const [configOwner, setConfigOwnerState] =
+      useState<ImageEditorConfigTool>("select");
+    const [creationTool, setCreationToolState] = useState<EditorTool>("select");
     const [documentState, setDocumentState] =
       useState<EditorDocumentState>(EMPTY_DOCUMENT);
     const [editingTextId, setEditingTextId] = useState<string | null>(null);
@@ -630,12 +682,12 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
     const [view, setView] = useState<EditorViewTransform>(INITIAL_VIEW);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
-    const configToolRef = useRef<ImageEditorConfigTool>("select");
+    const configOwnerRef = useRef<ImageEditorConfigTool>("select");
+    const creationToolRef = useRef(creationTool);
     const cropStartRef = useRef<SceneDocument | null>(null);
-    const currentToolRef = useRef(currentTool);
+    const dismissedSelectionIdRef = useRef<string | null>(null);
     const documentRef = useRef(documentState);
     const editingTextIdRef = useRef<string | null>(editingTextId);
-    const editingTextValueRef = useRef("");
     const interactionRef = useRef<EditorInteraction | null>(null);
     const isOpenRef = useRef(isOpen);
     const isToolConfigOpenRef = useRef(isToolConfigOpen);
@@ -653,14 +705,17 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       Partial<Record<ImageEditorConfigTool, HTMLButtonElement | null>>
     >({});
     const toolConfigWasOpenRef = useRef(false);
+    const textInitialSelectionRef = useRef(0);
     const viewRef = useRef(view);
 
     const { scene } = documentState;
     const selected = scene ? getSceneObject(scene, selectedId) : null;
     const editingText =
       scene && editingTextId ? getSceneObject(scene, editingTextId) : null;
-    const configTool: ImageEditorConfigTool = isCropping ? "crop" : currentTool;
-    configToolRef.current = configTool;
+    const selectedConfigTool = selected
+      ? OBJECT_CONFIG_TOOL[selected.kind]
+      : null;
+    configOwnerRef.current = configOwner;
     const layout = useMemo(
       () => (scene ? getSceneRenderLayout(scene, EDITOR_RENDER_EDGE) : null),
       [scene]
@@ -691,9 +746,14 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       setSelectedId(next);
     }, []);
 
-    const setTool = useCallback((next: EditorTool): void => {
-      currentToolRef.current = next;
-      setCurrentTool(next);
+    const setConfigOwner = useCallback((next: ImageEditorConfigTool): void => {
+      configOwnerRef.current = next;
+      setConfigOwnerState(next);
+    }, []);
+
+    const setCreationTool = useCallback((next: EditorTool): void => {
+      creationToolRef.current = next;
+      setCreationToolState(next);
     }, []);
 
     const setEditingText = useCallback((next: string | null): void => {
@@ -728,11 +788,13 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       setIsCropping(false);
       interactionRef.current = null;
       objectSequenceRef.current = 0;
-      editingTextValueRef.current = "";
+      dismissedSelectionIdRef.current = null;
+      textInitialSelectionRef.current = 0;
       updateDocument(EMPTY_DOCUMENT);
       setEditingText(null);
       setSelected(null);
-      setTool("select");
+      setConfigOwner("select");
+      setCreationTool("select");
       setToolConfigOpen(false);
       setEditorView(INITIAL_VIEW);
       setErrorMessage("");
@@ -750,9 +812,10 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       setEditorSession,
       setEditorView,
       setEditingText,
+      setConfigOwner,
+      setCreationTool,
       setOpenState,
       setSelected,
-      setTool,
       setToolConfigOpen,
       updateDocument,
     ]);
@@ -770,11 +833,13 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         setIsCropping(false);
         interactionRef.current = null;
         objectSequenceRef.current = 0;
-        editingTextValueRef.current = "";
+        dismissedSelectionIdRef.current = null;
+        textInitialSelectionRef.current = 0;
         updateDocument(EMPTY_DOCUMENT);
         setEditingText(null);
         setSelected(null);
-        setTool("select");
+        setConfigOwner("select");
+        setCreationTool("select");
         setToolConfigOpen(false);
         setEditorView(INITIAL_VIEW);
         setErrorMessage("");
@@ -802,6 +867,8 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
               scene: nextScene,
             });
             setSelected("image");
+            setConfigOwner("select");
+            setToolConfigOpen(true);
             setPhase("ready");
             setOpenState(true);
           });
@@ -829,9 +896,10 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         setEditorSession,
         setEditorView,
         setEditingText,
+        setConfigOwner,
+        setCreationTool,
         setOpenState,
         setSelected,
-        setTool,
         setToolConfigOpen,
         updateDocument,
       ]
@@ -895,7 +963,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       toolConfigWasOpenRef.current = isToolConfigOpen;
       if (wasOpen && !isToolConfigOpen) {
         window.setTimeout(() =>
-          toolButtonRefs.current[configToolRef.current]?.focus()
+          toolButtonRefs.current[configOwnerRef.current]?.focus()
         );
       }
     }, [isToolConfigOpen]);
@@ -972,7 +1040,18 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (!(current && objectId)) {
         return;
       }
-      previewScene(updateSceneObject(current, objectId, update));
+      previewScene(
+        updateSceneObject(current, objectId, (object) => {
+          const next = update(object);
+          if (next.kind === "arrow") {
+            return fitArrowSceneObject(next);
+          }
+          if (next.kind === "text") {
+            return fitTextObject(next);
+          }
+          return next;
+        })
+      );
     }
 
     function updateCanvas(
@@ -1019,7 +1098,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
           previewScene(
             updateSceneObject(current, object.id, (candidate) =>
               candidate.kind === "arrow"
-                ? { ...candidate, ...change.update }
+                ? fitArrowSceneObject({ ...candidate, ...change.update })
                 : candidate
             )
           );
@@ -1058,7 +1137,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
           previewScene(
             updateSceneObject(current, object.id, (candidate) =>
               candidate.kind === "text"
-                ? { ...candidate, ...change.update }
+                ? fitTextObject({ ...candidate, ...change.update })
                 : candidate
             )
           );
@@ -1187,7 +1266,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       });
       const objectId = selectedIdRef.current;
       if (objectId && !getSceneObject(nextScene, objectId)) {
-        setSelected(null);
+        selectObject(null);
       }
     }
 
@@ -1218,7 +1297,9 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       cropStartRef.current = null;
       setIsCropping(false);
-      setToolConfigOpen(false);
+      dismissedSelectionIdRef.current = null;
+      setConfigOwner("select");
+      setToolConfigOpen(true);
       commitScene();
     }
 
@@ -1229,7 +1310,9 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       cropStartRef.current = null;
       setIsCropping(false);
-      setToolConfigOpen(false);
+      dismissedSelectionIdRef.current = null;
+      setConfigOwner("select");
+      setToolConfigOpen(true);
       previewScene(cloneScene(cropStart));
     }
 
@@ -1243,8 +1326,10 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
       cropStartRef.current = cloneScene(current);
       setIsCropping(true);
-      setTool("select");
-      setToolConfigOpen(false);
+      dismissedSelectionIdRef.current = null;
+      setConfigOwner("crop");
+      setCreationTool("select");
+      setToolConfigOpen(true);
     }
 
     function toggleCropMode(): void {
@@ -1255,39 +1340,38 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       }
     }
 
+    function fitTextObject(object: TextSceneObject): TextSceneObject {
+      const context = canvasRef.current?.getContext("2d");
+      return context ? fitTextSceneObject(context, object) : object;
+    }
+
     function finishTextEditing(focusCanvas = true): void {
       const objectId = editingTextIdRef.current;
       if (!objectId) {
         return;
       }
-      editingTextIdRef.current = null;
-      setEditingTextId(null);
+      setEditingText(null);
       const current = documentRef.current.scene;
       const object = current ? getSceneObject(current, objectId) : null;
       if (current && object?.kind === "text") {
-        const text = editingTextValueRef.current;
-        if (text.length === 0) {
+        if (object.text.length === 0) {
           previewScene(removeSceneObject(current, objectId));
-          setSelected(null);
+          selectObject(null);
         } else {
-          previewScene(
-            updateSceneObject(current, objectId, (candidate) =>
-              candidate.kind === "text" ? { ...candidate, text } : candidate
-            )
-          );
-          setSelected(objectId);
+          selectObject(objectId);
         }
       }
-      editingTextValueRef.current = "";
-      setTool("select");
-      setToolConfigOpen(false);
+      setCreationTool("select");
       commitScene();
       if (focusCanvas) {
         window.requestAnimationFrame(() => canvasRef.current?.focus());
       }
     }
 
-    function beginTextEditing(objectId: string): void {
+    function beginTextEditing(
+      objectId: string,
+      initialSelection?: number
+    ): void {
       if (editingTextIdRef.current && editingTextIdRef.current !== objectId) {
         finishTextEditing(false);
       }
@@ -1296,15 +1380,29 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (object?.kind !== "text") {
         return;
       }
-      editingTextValueRef.current = object.text;
-      setSelected(objectId);
-      setTool("text");
-      setToolConfigOpen(false);
+      textInitialSelectionRef.current = initialSelection ?? object.text.length;
+      selectObject(objectId);
       setEditingText(objectId);
     }
 
     function updateEditingText(text: string): void {
-      editingTextValueRef.current = text;
+      const current = documentRef.current.scene;
+      const objectId = editingTextIdRef.current;
+      if (!(current && objectId)) {
+        return;
+      }
+      previewScene(
+        updateSceneObject(current, objectId, (object) =>
+          object.kind === "text" ? fitTextObject({ ...object, text }) : object
+        )
+      );
+    }
+
+    function handleTextBlur(nextTarget: EventTarget | null): void {
+      if (nextTarget instanceof Node && host.contains(nextTarget)) {
+        return;
+      }
+      finishTextEditing();
     }
 
     function selectTool(tool: EditorTool): void {
@@ -1314,8 +1412,10 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (cropStartRef.current) {
         finishCropMode();
       }
+      dismissedSelectionIdRef.current = null;
+      setConfigOwner(tool);
       setToolConfigOpen(false);
-      setTool(tool);
+      setCreationTool(tool);
       canvasRef.current?.focus();
     }
 
@@ -1330,24 +1430,54 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         canvasRef.current?.focus();
         return;
       }
+      const current = documentRef.current.scene;
+      const object = current
+        ? getSceneObject(current, selectedIdRef.current)
+        : null;
+      const isSelectedOwner =
+        object &&
+        OBJECT_CONFIG_TOOL[object.kind] === tool &&
+        creationToolRef.current === "select";
+      if (creationToolRef.current === tool || isSelectedOwner) {
+        dismissedSelectionIdRef.current = null;
+        setConfigOwner(tool);
+        setToolConfigOpen(true);
+        return;
+      }
       selectTool(tool);
     }
 
     function changeToolConfigOpen(next: boolean): void {
+      dismissedSelectionIdRef.current = next ? null : selectedIdRef.current;
       setToolConfigOpen(next);
     }
 
-    function selectObject(objectId: string | null): void {
+    function selectObject(
+      objectId: string | null,
+      { preserveCreationTool = false }: { preserveCreationTool?: boolean } = {}
+    ): void {
+      const previousId = selectedIdRef.current;
       if (cropStartRef.current && objectId !== selectedIdRef.current) {
         finishCropMode();
       }
-      setSelected(objectId);
-      setTool("select");
-      if (isToolConfigOpenRef.current) {
-        changeToolConfigOpen(false);
-      } else {
-        setToolConfigOpen(false);
+      const current = documentRef.current.scene;
+      const object = current ? getSceneObject(current, objectId) : null;
+      setSelected(object?.id ?? null);
+      if (!preserveCreationTool) {
+        setCreationTool("select");
       }
+      if (!object) {
+        dismissedSelectionIdRef.current = null;
+        setConfigOwner("select");
+        setToolConfigOpen(false);
+        return;
+      }
+      const owner = OBJECT_CONFIG_TOOL[object.kind];
+      setConfigOwner(owner);
+      if (object.id !== previousId) {
+        dismissedSelectionIdRef.current = null;
+      }
+      setToolConfigOpen(dismissedSelectionIdRef.current !== object.id);
     }
 
     function duplicateSelected(): void {
@@ -1366,7 +1496,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         y: object.y + 24,
       };
       previewScene({ ...current, objects: [...current.objects, copy] });
-      setSelected(copy.id);
+      selectObject(copy.id);
       commitScene();
     }
 
@@ -1377,7 +1507,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         return;
       }
       previewScene(removeSceneObject(current, objectId));
-      setSelected(null);
+      selectObject(null);
       commitScene();
     }
 
@@ -1430,15 +1560,14 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         y,
       };
       if (tool === "arrow") {
-        return {
+        return fitArrowSceneObject({
           ...base,
           ...sourceScene.toolDefaults.arrow,
-          height: 24,
           kind: "arrow",
           rotation:
             (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI,
           width: Math.max(12, Math.hypot(end.x - start.x, end.y - start.y)),
-        };
+        });
       }
       if (tool === "blur") {
         return { ...base, ...sourceScene.toolDefaults.blur, kind: "blur" };
@@ -1458,9 +1587,9 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       objectSequenceRef.current += 1;
       const sequence = objectSequenceRef.current;
       const defaults = current.toolDefaults.text;
-      const object: TextSceneObject = {
+      const object = fitTextObject({
         ...defaults,
-        height: 140,
+        height: defaults.fontSize * defaults.lineHeight,
         id: `text-${sequence}`,
         kind: "text",
         locked: false,
@@ -1471,11 +1600,10 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         width: Math.min(520, current.width * 0.5),
         x: point.x,
         y: point.y,
-      };
-      editingTextValueRef.current = "";
+      });
+      textInitialSelectionRef.current = 0;
       previewScene({ ...current, objects: [...current.objects, object] });
-      setSelected(object.id);
-      setTool("text");
+      selectObject(object.id, { preserveCreationTool: true });
       setEditingText(object.id);
     }
 
@@ -1609,7 +1737,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         objects: [...current.objects, object],
       };
       previewScene(nextScene);
-      setSelected(object.id);
+      selectObject(object.id, { preserveCreationTool: true });
       captureInteraction(event, {
         kind: "create",
         objectId,
@@ -1674,8 +1802,10 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (!point) {
         return;
       }
-      const tool = currentToolRef.current;
+      const tool = creationToolRef.current;
       if (tool === "text") {
+        event.preventDefault();
+        event.stopPropagation();
         addTextObject(point);
         return;
       }
@@ -1698,7 +1828,14 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (object?.kind === "text") {
         event.preventDefault();
         event.stopPropagation();
-        beginTextEditing(object.id);
+        const context = canvasRef.current?.getContext("2d");
+        const localPoint = point ? scenePointToObject(point, object) : null;
+        beginTextEditing(
+          object.id,
+          context && localPoint
+            ? getTextCaretIndex(context, object, localPoint)
+            : object.text.length
+        );
       } else if (object?.kind === "image") {
         selectObject(object.id);
         enterCropMode();
@@ -1736,8 +1873,15 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         return updateSceneObject(
           interaction.startScene,
           startObject.id,
-          (object) =>
-            resizeSceneObject(object, interaction.handle, delta, event.shiftKey)
+          (object) => {
+            const resized = resizeSceneObject(
+              object,
+              interaction.handle,
+              delta,
+              event.shiftKey
+            );
+            return resized.kind === "text" ? fitTextObject(resized) : resized;
+          }
         );
       }
       if (interaction.kind === "crop-pan" && startObject.kind === "image") {
@@ -1842,7 +1986,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
         commitScene();
       }
       if (interaction.kind === "create") {
-        setTool("select");
+        setCreationTool("select");
       }
     }
 
@@ -2085,7 +2229,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
 
     const getToolConfigAnchor = useCallback(
       (): Element | null =>
-        toolButtonRefs.current[configToolRef.current] ?? null,
+        toolButtonRefs.current[configOwnerRef.current] ?? null,
       []
     );
 
@@ -2099,21 +2243,36 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
       if (!(object?.visible && layout)) {
         return;
       }
+      const bounds = getSceneObjectLocalBounds(object);
+      const corners = getSceneObjectCorners(object);
+      const center = corners.reduce(
+        (sum, point) => ({ x: sum.x + point.x / 4, y: sum.y + point.y / 4 }),
+        { x: 0, y: 0 }
+      );
+      const stageCenter = sceneToStage(center);
+      if (!stageCenter) {
+        return;
+      }
       const factor = layout.scale * view.scale;
-      const centerX =
-        view.x + (layout.x + object.x * layout.scale) * view.scale;
-      const centerY =
-        view.y + (layout.y + object.y * layout.scale) * view.scale;
       return {
-        height: object.height * factor,
-        left: centerX - (object.width * factor) / 2,
-        top: centerY - (object.height * factor) / 2,
+        height: bounds.height * factor,
+        left: stageCenter.x - (bounds.width * factor) / 2,
+        top: stageCenter.y - (bounds.height * factor) / 2,
         transform: `rotate(${object.rotation}deg)`,
-        width: object.width * factor,
+        width: bounds.width * factor,
       };
     };
 
     const selectionStyle = getObjectStyle(selected);
+    let selectionPoints: string | undefined;
+    if (selected?.visible) {
+      const points = getSceneObjectCorners(selected).map(sceneToStage);
+      if (points.every((point) => point !== null)) {
+        selectionPoints = points
+          .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+          .join(" ");
+      }
+    }
     let textEditorStyle: CSSProperties | undefined;
     if (editingText?.kind === "text") {
       const objectStyle = getObjectStyle(editingText);
@@ -2132,6 +2291,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
             letterSpacing: editingText.letterSpacing * factor,
             lineHeight: editingText.lineHeight,
             opacity: editingText.opacity,
+            padding: `${editingText.fontSize * factor * 0.175}px 0`,
             textAlign: editingText.align,
           }
         : undefined;
@@ -2165,6 +2325,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
                 canvasStyle={canvasStyle}
                 editingText={editingText}
                 errorMessage={errorMessage}
+                initialTextSelection={textInitialSelectionRef.current}
                 isCropping={isCropping}
                 onDoubleClick={handleStageDoubleClick}
                 onPointerCancel={finishInteraction}
@@ -2173,10 +2334,12 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
                 onPointerUp={finishInteraction}
                 onResize={startResize}
                 onRotate={startRotate}
+                onTextBlur={handleTextBlur}
                 onTextChange={updateEditingText}
                 onTextFinish={finishTextEditing}
                 onWheel={handleWheel}
                 selected={selected}
+                selectionPoints={selectionPoints}
                 selectionStyle={selectionStyle}
                 stageRef={stageRef}
                 textEditorStyle={textEditorStyle}
@@ -2213,7 +2376,10 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
                 >
                   <nav aria-label="Image editor tools">
                     {[...EDITOR_TOOLS, "crop" as const].map((tool) => {
-                      const isActive = configTool === tool;
+                      const isActive =
+                        tool === "crop" ? isCropping : creationTool === tool;
+                      const isContextual =
+                        !isCropping && selectedConfigTool === tool;
                       return (
                         <ToolButton
                           disabled={
@@ -2221,6 +2387,8 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
                           }
                           isActive={isActive}
                           isConfigOpen={isToolConfigOpen}
+                          isConfigOwner={configOwner === tool}
+                          isContextual={isContextual}
                           key={tool}
                           onActivate={activateConfigTool}
                           onToggleConfig={() =>
@@ -2238,7 +2406,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
                   </nav>
                   <LiquidMenuContent
                     align="center"
-                    aria-label={`${TOOL_DETAILS[configTool].label} configuration`}
+                    aria-label={`${TOOL_DETAILS[configOwner].label} configuration`}
                     className="better-x-image-editor__inspector-surface"
                     data-liquid-theme={getEditorLiquidTheme(session)}
                     onKeyDown={(event) => event.stopPropagation()}
@@ -2265,7 +2433,7 @@ const ImageEditor = forwardRef<ImageEditorHandle, ImageEditorProps>(
                           onUpdateToolStyle={updateToolStyle}
                           scene={scene}
                           selected={selected}
-                          tool={configTool}
+                          tool={configOwner}
                         />
                       ) : null}
                     </LiquidMenuAutoSize>

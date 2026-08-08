@@ -1,21 +1,27 @@
 // biome-ignore-all lint/performance/noJsxPropsBind: Native text events must remain attached to the editing surface.
 import {
   type CSSProperties,
+  type FocusEvent,
   type KeyboardEvent,
   type ReactElement,
+  type SyntheticEvent,
   useLayoutEffect,
   useRef,
 } from "react";
 import type { TextSceneObject } from "../lib/image-editor";
 
 interface TextObjectEditorProps {
+  readonly initialSelection: number;
   readonly object: TextSceneObject;
+  readonly onBlur: (nextTarget: EventTarget | null) => void;
   readonly onChange: (text: string) => void;
   readonly onFinish: () => void;
   readonly style: CSSProperties;
 }
 
 export function TextObjectEditor({
+  initialSelection,
+  onBlur,
   object,
   onChange,
   onFinish,
@@ -29,8 +35,8 @@ export function TextObjectEditor({
       return;
     }
     editor.focus();
-    editor.setSelectionRange(editor.value.length, editor.value.length);
-  }, []);
+    editor.setSelectionRange(initialSelection, initialSelection);
+  }, [initialSelection]);
 
   const stopEditorKey = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     event.stopPropagation();
@@ -39,7 +45,10 @@ export function TextObjectEditor({
       onFinish();
     }
   };
-  const finishOnBlur = (): void => onFinish();
+  const finishOnBlur = (event: FocusEvent<HTMLTextAreaElement>): void =>
+    onBlur(event.relatedTarget);
+  const stopEditorEvent = (event: SyntheticEvent): void =>
+    event.stopPropagation();
 
   return (
     <textarea
@@ -48,14 +57,25 @@ export function TextObjectEditor({
       autoCapitalize="sentences"
       className="better-x-image-editor__text-editor"
       defaultValue={object.text}
+      onBeforeInput={stopEditorEvent}
       onBlur={finishOnBlur}
-      onChange={(event) => onChange(event.currentTarget.value)}
-      onClick={(event) => event.stopPropagation()}
-      onContextMenu={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        event.stopPropagation();
+        onChange(event.currentTarget.value);
+      }}
+      onClick={stopEditorEvent}
+      onCompositionEnd={stopEditorEvent}
+      onCompositionStart={stopEditorEvent}
+      onCompositionUpdate={stopEditorEvent}
+      onContextMenu={stopEditorEvent}
+      onCopy={stopEditorEvent}
+      onCut={stopEditorEvent}
+      onDoubleClick={stopEditorEvent}
       onKeyDown={stopEditorKey}
-      onKeyUp={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
+      onKeyUp={stopEditorEvent}
+      onPaste={stopEditorEvent}
+      onPointerDown={stopEditorEvent}
+      onPointerUp={stopEditorEvent}
       ref={editorRef}
       spellCheck
       style={style}

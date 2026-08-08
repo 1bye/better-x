@@ -1,15 +1,23 @@
 import { describe, expect, test } from "bun:test";
+import { getArrowGeometry, isPointInArrowGeometry } from "./arrow-geometry.ts";
 import {
   createInitialScene,
+  fitArrowSceneObject,
+  getSceneObjectCorners,
   getSceneRenderLayout,
   isPointInObject,
   panImageCrop,
   resetImageCrop,
   resizeImageCrop,
   resizeSceneObject,
+  rotatePoint,
   setImageCropAspect,
   zoomImageCrop,
 } from "./image-editor.ts";
+import {
+  getTextCaretIndex,
+  getTextObjectLayout,
+} from "./image-editor-renderer.ts";
 import {
   fitImageEditorView,
   getSharedElementFrame,
@@ -77,9 +85,12 @@ describe("image editor scene model", () => {
     const scene = createInitialScene(1200, 800);
     expect(scene.toolDefaults).toMatchObject({
       arrow: {
-        arrowhead: "open",
+        drawStyle: "draw",
+        endArrowhead: "open",
         lineStyle: "solid",
         opacity: 1,
+        pathStyle: "curved",
+        startArrowhead: "none",
       },
       blur: {
         feather: 8,
@@ -115,6 +126,89 @@ describe("image editor scene model", () => {
 
     const freeform = resizeImageCrop(square, "east", { x: 20, y: 0 });
     expect(freeform.cropAspect).toBeNull();
+  });
+
+  test("builds deterministic arrow geometry for preview, hit testing, and export", () => {
+    const defaults = createInitialScene(1600, 900).toolDefaults.arrow;
+    const arrow = fitArrowSceneObject({
+      ...defaults,
+      height: 1,
+      id: "arrow-deterministic",
+      kind: "arrow",
+      locked: false,
+      name: "Arrow",
+      opacity: 1,
+      rotation: 33,
+      visible: true,
+      width: 420,
+      x: 400,
+      y: 300,
+    });
+    const first = getArrowGeometry(arrow);
+    const second = getArrowGeometry(arrow);
+
+    expect(second).toEqual(first);
+    expect(first.shaftPath).toContain(" Q ");
+    expect(first.startHead).toBeNull();
+    expect(first.endHead?.closed).toBe(false);
+    expect(arrow.height).toBeCloseTo(first.bounds.height);
+    expect(
+      isPointInArrowGeometry(
+        first.samples[Math.floor(first.samples.length / 2)],
+        first,
+        arrow.strokeWidth
+      )
+    ).toBe(true);
+    expect(
+      isPointInArrowGeometry(
+        { x: 0, y: first.bounds.y - 100 },
+        first,
+        arrow.strokeWidth
+      )
+    ).toBe(false);
+    const localSample = first.samples[Math.floor(first.samples.length / 2)];
+    const rotatedSample = rotatePoint(localSample, 180);
+    expect(
+      isPointInObject(
+        { x: arrow.x + rotatedSample.x, y: arrow.y + rotatedSample.y },
+        { ...arrow, rotation: 180 }
+      )
+    ).toBe(true);
+  });
+
+  test("keeps short, long, bent, and double-headed arrows finite", () => {
+    const defaults = createInitialScene(1200, 800).toolDefaults.arrow;
+    for (const [index, width] of [12, 120, 1200].entries()) {
+      const arrow = fitArrowSceneObject({
+        ...defaults,
+        bend: index === 1 ? -140 : defaults.bend,
+        endArrowhead: "filled",
+        height: 1,
+        id: `arrow-${width}`,
+        kind: "arrow",
+        locked: false,
+        name: "Arrow",
+        opacity: 1,
+        rotation: index * 90,
+        startArrowhead: "open",
+        visible: true,
+        width,
+        x: 200,
+        y: 200,
+      });
+      const geometry = getArrowGeometry(arrow);
+      expect(
+        [
+          geometry.bounds.x,
+          geometry.bounds.y,
+          geometry.bounds.width,
+          geometry.bounds.height,
+        ].every(Number.isFinite)
+      ).toBe(true);
+      expect(geometry.startHead).not.toBeNull();
+      expect(geometry.endHead?.closed).toBe(true);
+      expect(getSceneObjectCorners(arrow)).toHaveLength(4);
+    }
   });
 });
 
@@ -212,5 +306,48 @@ describe("image editor viewport", () => {
       clipPath: "inset(575px 0px 575px 0px round 26.666666666666668px)",
       transform: "translate(100px, -245px) scale(0.6)",
     });
+  });
+});
+
+describe("image editor text layout", () => {
+  const context = {
+    font: "",
+    measureText: (text) => ({ width: Array.from(text).length * 10 }),
+  };
+  const textObject = {
+    align: "left",
+    background: "transparent",
+    color: "#000000",
+    fontFamily: "sans-serif",
+    fontSize: 20,
+    fontWeight: 400,
+    height: 24,
+    id: "text-unicode",
+    kind: "text",
+    letterSpacing: 0,
+    lineHeight: 1.2,
+    locked: false,
+    name: "Unicode text",
+    opacity: 1,
+    rotation: 0,
+    shadow: 0,
+    text: "A😀B",
+    visible: true,
+    width: 15,
+    x: 100,
+    y: 100,
+  };
+
+  test("wraps without splitting UTF-16 surrogate pairs", () => {
+    const layout = getTextObjectLayout(context, textObject);
+
+    expect(layout.lines.map((line) => line.text)).toEqual(["A", "😀", "B"]);
+    expect(layout.lines.map((line) => line.start)).toEqual([0, 1, 3]);
+  });
+
+  test("returns native textarea offsets when clicking after emoji", () => {
+    const wideObject = { ...textObject, width: 100 };
+
+    expect(getTextCaretIndex(context, wideObject, { x: -25, y: 0 })).toBe(3);
   });
 });

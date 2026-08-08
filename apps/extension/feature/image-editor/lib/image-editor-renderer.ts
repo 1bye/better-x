@@ -1,6 +1,8 @@
+import { getArrowGeometry } from "./arrow-geometry";
 import {
   type ArrowSceneObject,
   type BlurSceneObject,
+  clamp,
   getSceneRenderLayout,
   type ImageSceneObject,
   type RectangleSceneObject,
@@ -10,7 +12,7 @@ import {
   type TextSceneObject,
 } from "./image-editor";
 
-const WORD_SEPARATOR_PATTERN = /\s+/;
+const WHITESPACE_CHARACTER_PATTERN = /\s/u;
 
 const createRoundRect = (
   context: CanvasRenderingContext2D,
@@ -103,67 +105,187 @@ const drawArrowObject = (
   context: CanvasRenderingContext2D,
   object: ArrowSceneObject
 ): void => {
-  const head = Math.max(12, object.strokeWidth * 4.5);
+  const geometry = getArrowGeometry(object);
   let lineDash: number[] = [];
   if (object.lineStyle === "dashed") {
     lineDash = [object.strokeWidth * 3, object.strokeWidth * 2];
   } else if (object.lineStyle === "dotted") {
     lineDash = [0, object.strokeWidth * 2];
   }
-  context.beginPath();
-  context.moveTo(-object.width / 2, 0);
-  context.lineTo(object.width / 2, 0);
   context.lineCap = "round";
   context.lineJoin = "round";
   context.lineWidth = object.strokeWidth;
   context.setLineDash(lineDash);
-  context.shadowBlur = object.strokeWidth;
-  context.shadowColor = "rgb(0 0 0 / 40%)";
   context.strokeStyle = object.stroke;
-  context.stroke();
-
-  if (object.arrowhead === "none") {
-    return;
-  }
+  context.stroke(new Path2D(geometry.shaftPath));
 
   context.setLineDash([]);
-  context.beginPath();
-  context.moveTo(object.width / 2 - head, -head * 0.55);
-  context.lineTo(object.width / 2, 0);
-  context.lineTo(object.width / 2 - head, head * 0.55);
-  if (object.arrowhead === "filled") {
-    context.closePath();
-    context.fillStyle = object.stroke;
-    context.fill();
-  } else {
-    context.stroke();
+  for (const head of [geometry.startHead, geometry.endHead]) {
+    if (!head) {
+      continue;
+    }
+    const path = new Path2D(head.path);
+    if (head.closed) {
+      context.fillStyle = object.stroke;
+      context.fill(path);
+    } else {
+      context.stroke(path);
+    }
   }
+};
+
+interface TextLayoutLine {
+  readonly start: number;
+  readonly text: string;
+  readonly width: number;
+}
+
+export interface TextObjectLayout {
+  readonly height: number;
+  readonly lineHeight: number;
+  readonly lines: readonly TextLayoutLine[];
+  readonly paddingY: number;
+}
+
+const measureTextWidth = (
+  context: CanvasRenderingContext2D,
+  object: TextSceneObject,
+  text: string
+): number =>
+  context.measureText(text).width +
+  Math.max(0, Array.from(text).length - 1) * object.letterSpacing;
+
+const getNextCodePointEnd = (text: string, start: number): number => {
+  const codePoint = text.codePointAt(start);
+  return start + (codePoint !== undefined && codePoint > 0xff_ff ? 2 : 1);
+};
+
+const getParagraphLineEnd = (
+  context: CanvasRenderingContext2D,
+  object: TextSceneObject,
+  paragraph: string,
+  lineStart: number
+): number => {
+  let lineEnd = getNextCodePointEnd(paragraph, lineStart);
+  let lastBreak = -1;
+  let previousEnd = lineStart;
+  while (lineEnd <= paragraph.length) {
+    const candidate = paragraph.slice(lineStart, lineEnd);
+    if (WHITESPACE_CHARACTER_PATTERN.test(candidate.at(-1) ?? "")) {
+      lastBreak = lineEnd;
+    }
+    if (
+      previousEnd > lineStart &&
+      measureTextWidth(context, object, candidate) > object.width
+    ) {
+      return lastBreak > lineStart ? lastBreak : previousEnd;
+    }
+    if (lineEnd === paragraph.length) {
+      return lineEnd;
+    }
+    previousEnd = lineEnd;
+    lineEnd = getNextCodePointEnd(paragraph, lineEnd);
+  }
+  return lineEnd;
+};
+
+const wrapParagraph = (
+  context: CanvasRenderingContext2D,
+  object: TextSceneObject,
+  paragraph: string,
+  sourceStart: number
+): readonly TextLayoutLine[] => {
+  if (paragraph.length === 0) {
+    return [{ start: sourceStart, text: "", width: 0 }];
+  }
+  const lines: TextLayoutLine[] = [];
+  let lineStart = 0;
+  while (lineStart < paragraph.length) {
+    const lineEnd = getParagraphLineEnd(context, object, paragraph, lineStart);
+    const text = paragraph.slice(lineStart, lineEnd);
+    lines.push({
+      start: sourceStart + lineStart,
+      text,
+      width: measureTextWidth(context, object, text),
+    });
+    lineStart = lineEnd;
+  }
+  return lines;
 };
 
 const wrapText = (
   context: CanvasRenderingContext2D,
   object: TextSceneObject
-): readonly string[] => {
+): readonly TextLayoutLine[] => {
   context.font = `${object.fontWeight} ${object.fontSize}px ${object.fontFamily}`;
-  const lines: string[] = [];
+  const lines: TextLayoutLine[] = [];
+  let sourceStart = 0;
   for (const paragraph of object.text.split("\n")) {
-    const words = paragraph.split(WORD_SEPARATOR_PATTERN);
-    let line = "";
-    for (const word of words) {
-      const candidate = line ? `${line} ${word}` : word;
-      const width =
-        context.measureText(candidate).width +
-        Math.max(0, candidate.length - 1) * object.letterSpacing;
-      if (line && width > object.width) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = candidate;
-      }
-    }
-    lines.push(line);
+    lines.push(...wrapParagraph(context, object, paragraph, sourceStart));
+    sourceStart += paragraph.length + 1;
   }
   return lines;
+};
+
+export const getTextObjectLayout = (
+  context: CanvasRenderingContext2D,
+  object: TextSceneObject
+): TextObjectLayout => {
+  const lines = wrapText(context, object);
+  const lineHeight = object.fontSize * object.lineHeight;
+  const paddingY = object.fontSize * 0.175;
+  return {
+    height: Math.max(lineHeight, lines.length * lineHeight + paddingY * 2),
+    lineHeight,
+    lines,
+    paddingY,
+  };
+};
+
+export const fitTextSceneObject = (
+  context: CanvasRenderingContext2D,
+  object: TextSceneObject
+): TextSceneObject => ({
+  ...object,
+  height: getTextObjectLayout(context, object).height,
+});
+
+export const getTextCaretIndex = (
+  context: CanvasRenderingContext2D,
+  object: TextSceneObject,
+  point: { readonly x: number; readonly y: number }
+): number => {
+  const layout = getTextObjectLayout(context, object);
+  const lineIndex = Math.floor(
+    clamp(
+      (point.y + object.height / 2 - layout.paddingY) / layout.lineHeight,
+      0,
+      Math.max(0, layout.lines.length - 1)
+    )
+  );
+  const line = layout.lines[lineIndex] ?? layout.lines[0];
+  if (!line) {
+    return 0;
+  }
+  let lineLeft = -object.width / 2;
+  if (object.align === "center") {
+    lineLeft = -line.width / 2;
+  } else if (object.align === "right") {
+    lineLeft = object.width / 2 - line.width;
+  }
+  const target = point.x - lineLeft;
+  let cursor = 0;
+  let sourceOffset = 0;
+  for (const character of line.text) {
+    const characterWidth =
+      context.measureText(character).width + object.letterSpacing;
+    if (target <= cursor + characterWidth / 2) {
+      return line.start + sourceOffset;
+    }
+    cursor += characterWidth;
+    sourceOffset += character.length;
+  }
+  return line.start + line.text.length;
 };
 
 const fillSpacedText = (
@@ -183,7 +305,7 @@ const fillSpacedText = (
   );
   const totalWidth =
     widths.reduce((sum, width) => sum + width, 0) +
-    Math.max(0, text.length - 1) * letterSpacing;
+    Math.max(0, characters.length - 1) * letterSpacing;
   let cursor = x;
   if (context.textAlign === "center") {
     cursor -= totalWidth / 2;
@@ -212,25 +334,23 @@ const drawTextObject = (
     );
     context.fill();
   }
-  const lines = wrapText(context, object);
-  const lineHeight = object.fontSize * object.lineHeight;
-  const textHeight = lines.length * lineHeight;
-  let x = -object.width / 2;
-  if (object.align === "center") {
-    x = 0;
-  } else if (object.align === "right") {
-    x = object.width / 2;
-  }
-  let y = -textHeight / 2 + object.fontSize;
   context.font = `${object.fontWeight} ${object.fontSize}px ${object.fontFamily}`;
   context.textAlign = object.align;
   context.textBaseline = "alphabetic";
   context.fillStyle = object.color;
   context.shadowBlur = object.shadow;
   context.shadowColor = "rgb(0 0 0 / 46%)";
-  for (const line of lines) {
-    fillSpacedText(context, line, x, y, object.letterSpacing);
-    y += lineHeight;
+  const layout = getTextObjectLayout(context, object);
+  let y = -object.height / 2 + layout.paddingY + object.fontSize;
+  for (const line of layout.lines) {
+    let x = -object.width / 2;
+    if (object.align === "center") {
+      x = 0;
+    } else if (object.align === "right") {
+      x = object.width / 2;
+    }
+    fillSpacedText(context, line.text, x, y, object.letterSpacing);
+    y += layout.lineHeight;
   }
 };
 
